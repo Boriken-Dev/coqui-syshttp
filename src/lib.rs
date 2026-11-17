@@ -10,7 +10,9 @@
 
 extern crate alloc;
 
+pub mod auth;
 mod bypass;
+mod connect;
 mod env;
 mod error;
 mod netutil;
@@ -20,7 +22,9 @@ mod proxy;
 mod resolver;
 pub mod system;
 
+pub use auth::{Negotiate, NegotiateBuilder};
 pub use bypass::{BypassRules, Dialect};
+pub use connect::{Connection, ProxyConnector, ProxyConnectorBuilder};
 pub use env::{Environment, ProxyVariables};
 pub use error::{Error, Reason};
 pub use proxy::{Credentials, Proxy, ProxyBuilder, ProxyScheme, Route, Secret};
