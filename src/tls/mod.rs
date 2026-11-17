@@ -314,6 +314,10 @@ impl ServerCertVerifier for DisabledVerifier {
 /// of the current user, the macOS Keychain, and, with the `pkcs11` feature, PKCS#11's default
 /// module where there is one.
 pub(crate) fn system_sources() -> Vec<Box<dyn IdentitySource>> {
+    #[cfg_attr(
+        not(any(windows, target_os = "macos", all(feature = "pkcs11", unix))),
+        expect(unused_mut, reason = "no keystore is built in for this platform")
+    )]
     let mut sources: Vec<Box<dyn IdentitySource>> = Vec::new();
     #[cfg(windows)]
     match CngSource::current_user("MY") {
