@@ -17,6 +17,9 @@ explicit. Full API reference: <https://docs.rs/coqui-syshttp>.
 - **Proxy per URL**: `Resolver` answers with the routes to try, in order. The proxy variables
   decide when any is set, else the operating system does; `NO_PROXY` and the system's own bypass
   list go direct first.
+- **Child processes**: `Resolver::child_environment` writes the system's proxy as
+  `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for a program you start, and says what those
+  variables cannot hold.
 - **PAC and WPAD**: WinHTTP does both on Windows; elsewhere the Boa JavaScript engine runs the
   script (feature `pac`) with the Netscape and Microsoft `*Ex` builtins, a time limit per call,
   and DNS-based WPAD discovery.
@@ -65,6 +68,19 @@ assert!(matches!(&routes[0], Route::Proxy(proxy) if proxy.host() == "proxy.corp"
 
 `Resolver::system()` is the same with this process's environment and no override.
 
+The variables for a program you start (a package manager, `git`, an agent):
+
+```rust,no_run
+use coqui_syshttp::Resolver;
+
+let child = Resolver::system().child_environment(["https://registry.example/"])?;
+for (name, value) in child.pairs() {
+    // command.env(name, value);
+}
+// A PAC script is asked about the endpoints named above; child.unexpressed() lists what is left.
+# Ok::<(), coqui_syshttp::Error>(())
+```
+
 A tunnel through a proxy that wants Basic:
 
 ```rust,no_run
@@ -97,7 +113,7 @@ let body = agent.get("https://example.com/").call()?.body_mut().read_to_string()
 
 | Module | Purpose |
 | --- | --- |
-| root | `Resolver`, `Route`, `Proxy`, `Credentials`, `BypassRules`, `Environment`, `ProxyConnector`, `Connection`, `Negotiate`, `Error` |
+| root | `Resolver`, `ChildEnvironment`, `Route`, `Proxy`, `Credentials`, `BypassRules`, `Environment`, `ProxyConnector`, `Connection`, `Negotiate`, `Error` |
 | `system` | the operating system's proxy settings as data: `SystemSettings::read` |
 | `auth` | `basic_header`, the `Negotiate` policy and its limits |
 | `pac` | `PacScript`: a PAC script evaluated in-process (feature `pac`) |

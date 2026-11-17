@@ -33,4 +33,4 @@ pub use connect::{Connection, ProxyConnector, ProxyConnectorBuilder};
 pub use env::{Environment, ProxyVariables};
 pub use error::{Error, Reason};
 pub use proxy::{Credentials, Proxy, ProxyBuilder, ProxyScheme, Route, Secret};
-pub use resolver::{OnMissingEngine, ProxySetting, Resolver, ResolverBuilder};
+pub use resolver::{ChildEnvironment, OnMissingEngine, ProxySetting, Resolver, ResolverBuilder};

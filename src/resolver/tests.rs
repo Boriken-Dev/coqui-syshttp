@@ -279,3 +279,241 @@ mod without_pac {
         );
     }
 }
+
+mod child_environment {
+    use super::*;
+
+    fn value(environment: &ChildEnvironment, name: &str) -> Option<String> {
+        environment
+            .pairs()
+            .into_iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value)
+    }
+
+    fn system(settings: SystemSettings) -> ResolverBuilder {
+        Resolver::builder()
+            .environment(Environment::from_pairs([("PATH", "x")]))
+            .settings(settings)
+    }
+
+    #[test]
+    fn nothing_is_set_when_everything_goes_direct() {
+        let environment = isolated().build().child_environment(["https://a.example/"]);
+        let environment = environment.unwrap();
+        assert!(environment.pairs().is_empty());
+        assert!(!environment.per_endpoint());
+    }
+
+    #[test]
+    fn the_systems_manual_proxies_and_bypass_list_become_variables() {
+        let settings = SystemSettings {
+            bypass: BypassRules::parse(
+                "*.corp.example;10.0.0.0/8;<local>;intranet.example",
+                Dialect::WinInet,
+            ),
+            ..manual("http=web:3128;https=secure:3129")
+        };
+        let environment = system(settings)
+            .build()
+            .child_environment(Vec::<&str>::new())
+            .unwrap();
+        assert_eq!(
+            value(&environment, "HTTP_PROXY").unwrap(),
+            "http://web:3128"
+        );
+        assert_eq!(
+            value(&environment, "HTTPS_PROXY").unwrap(),
+            "http://secure:3129"
+        );
+        assert_eq!(
+            environment.no_proxy(),
+            [
+                "localhost",
+                "127.0.0.1",
+                "::1",
+                "corp.example",
+                "10.0.0.0/8",
+                "intranet.example"
+            ]
+        );
+        assert_eq!(environment.unexpressed(), ["<local>"]);
+        assert!(!environment.per_endpoint());
+        let names: Vec<_> = environment
+            .pairs()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(names.contains(&"http_proxy".to_string()), !cfg!(windows));
+    }
+
+    #[test]
+    fn a_login_goes_into_the_url_percent_encoded() {
+        let resolver = system(manual("web:3128"))
+            .credentials(crate::Credentials::new("DOM\\user", "p@ss:word"))
+            .build();
+        let environment = resolver.child_environment(["https://a.example/"]).unwrap();
+        assert_eq!(
+            value(&environment, "HTTPS_PROXY").unwrap(),
+            "http://DOM%5Cuser:p%40ss%3Aword@web:3128"
+        );
+        assert!(!format!("{environment:?}").contains("p@ss"));
+    }
+
+    #[test]
+    fn an_explicit_proxy_and_its_bypass_list_are_passed_on() {
+        let resolver = isolated()
+            .proxy(ProxySetting::Proxy(proxy("http://chosen:3")))
+            .no_proxy(BypassRules::parse("internal.example", Dialect::NoProxy))
+            .build();
+        let environment = resolver.child_environment(Vec::<&str>::new()).unwrap();
+        assert_eq!(
+            value(&environment, "HTTP_PROXY").unwrap(),
+            "http://chosen:3"
+        );
+        assert_eq!(
+            value(&environment, "NO_PROXY").unwrap(),
+            "localhost,127.0.0.1,::1,internal.example"
+        );
+    }
+
+    #[test]
+    fn loopback_is_left_out_when_the_list_turns_it_off() {
+        let resolver = isolated()
+            .proxy(ProxySetting::Proxy(proxy("http://chosen:3")))
+            .no_proxy(BypassRules::parse(
+                "<-loopback>,a.example",
+                Dialect::NoProxy,
+            ))
+            .build();
+        let environment = resolver.child_environment(Vec::<&str>::new()).unwrap();
+        assert_eq!(environment.no_proxy(), ["a.example"]);
+    }
+
+    #[test]
+    fn a_variable_with_a_pac_result_becomes_the_proxy_it_names() {
+        let environment = Environment::from_pairs([
+            ("HTTPS_PROXY", "PROXY gateway:8080; DIRECT"),
+            ("NO_PROXY", "corp.example"),
+        ]);
+        let resolver = Resolver::builder().environment(environment).build();
+        let environment = resolver.child_environment(Vec::<&str>::new()).unwrap();
+        assert_eq!(
+            value(&environment, "HTTPS_PROXY").unwrap(),
+            "http://gateway:8080"
+        );
+        assert!(value(&environment, "HTTP_PROXY").is_none());
+        assert!(environment.no_proxy().contains(&"corp.example".to_string()));
+    }
+
+    #[test]
+    fn an_endpoint_a_bypass_rule_without_a_variable_form_covers_is_listed_by_host() {
+        let settings = SystemSettings {
+            bypass: BypassRules::parse("<local>", Dialect::WinInet),
+            ..manual("web:3128")
+        };
+        let environment = system(settings)
+            .build()
+            .child_environment(["https://intranet/api", "https://public.example/"])
+            .unwrap();
+        assert!(environment.no_proxy().contains(&"intranet".to_string()));
+        assert!(
+            !environment
+                .no_proxy()
+                .contains(&"public.example".to_string())
+        );
+        assert!(environment.unexpressed().contains(&"<local>".to_string()));
+    }
+
+    #[test]
+    fn socks_alone_is_not_written_and_is_said_so() {
+        let environment = system(manual("socks=gate:1080"))
+            .build()
+            .child_environment(["https://a.example/"])
+            .unwrap();
+        assert!(environment.pairs().is_empty());
+        assert!(!environment.unexpressed().is_empty());
+    }
+
+    #[test]
+    fn a_list_naming_the_hosts_that_use_the_proxy_is_resolved_for_the_endpoints() {
+        let settings = SystemSettings {
+            bypass: BypassRules::parse("corp.example", Dialect::KdeReversed),
+            ..manual("web:3128")
+        };
+        let environment = system(settings)
+            .build()
+            .child_environment(["https://api.corp.example/", "https://other.example/"])
+            .unwrap();
+        assert!(environment.per_endpoint());
+        assert_eq!(
+            value(&environment, "HTTPS_PROXY").unwrap(),
+            "http://web:3128"
+        );
+        assert!(
+            environment
+                .no_proxy()
+                .contains(&"other.example".to_string())
+        );
+    }
+
+    #[test]
+    fn an_endpoint_that_is_not_a_url_is_an_error() {
+        assert!(isolated().build().child_environment(["not a url"]).is_err());
+    }
+
+    #[cfg(feature = "pac")]
+    mod with_pac {
+        use super::*;
+
+        const PAC: &str = "function FindProxyForURL(url, host) {
+            if (host == 'direct.example') return 'DIRECT';
+            if (host == 'other.example') return 'PROXY second:3128';
+            return 'PROXY first:3128';
+        }";
+
+        fn pac_settings() -> SystemSettings {
+            SystemSettings::builder(SettingsSource::Windows, SettingsState::Configured)
+                .pac_script(PAC)
+                .build()
+        }
+
+        #[test]
+        fn a_pac_script_is_asked_about_each_endpoint() {
+            let environment = system(pac_settings())
+                .build()
+                .child_environment([
+                    "https://api.example/",
+                    "https://direct.example/",
+                    "https://other.example/",
+                    "http://plain.example/",
+                ])
+                .unwrap();
+            assert!(environment.per_endpoint());
+            assert_eq!(
+                value(&environment, "HTTPS_PROXY").unwrap(),
+                "http://first:3128"
+            );
+            assert_eq!(
+                value(&environment, "HTTP_PROXY").unwrap(),
+                "http://first:3128"
+            );
+            assert!(
+                environment
+                    .no_proxy()
+                    .contains(&"direct.example".to_string())
+            );
+            assert_eq!(environment.unexpressed(), ["https://other.example/"]);
+        }
+
+        #[test]
+        fn a_pac_script_with_no_endpoints_sets_nothing() {
+            let environment = system(pac_settings())
+                .build()
+                .child_environment(Vec::<&str>::new())
+                .unwrap();
+            assert!(environment.pairs().is_empty());
+            assert!(environment.per_endpoint());
+        }
+    }
+}

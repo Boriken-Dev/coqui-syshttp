@@ -180,12 +180,69 @@ impl BypassRules {
         Target::parse(url).is_ok_and(|target| self.matches_target(&target))
     }
 
+    /// Whether the list names the hosts that use the proxy rather than the ones that bypass it.
+    pub(crate) fn is_reversed(&self) -> bool {
+        self.reversed
+    }
+
+    /// The list as `NO_PROXY` entries, with what that syntax cannot say set apart.
+    ///
+    /// A bare name in `NO_PROXY` covers its subdomains, so an exact host of another dialect is
+    /// written the same way and widens. Loopback is listed when the list bypasses it, since
+    /// most programs do not bypass it themselves. A reversed list has no `NO_PROXY` form.
+    pub(crate) fn to_no_proxy(&self) -> NoProxyList {
+        let mut list = NoProxyList::default();
+        if self.reversed {
+            list.unexpressed.extend(self.entries.iter().cloned());
+            list.unexpressed.extend(self.skipped.iter().cloned());
+            return list;
+        }
+        if self.loopback {
+            list.entries
+                .extend(["localhost", "127.0.0.1", "::1"].map(String::from));
+        }
+        let listed = self
+            .entries
+            .iter()
+            .filter(|entry| !entry.eq_ignore_ascii_case("<-loopback>"));
+        for (rule, text) in self.rules.iter().zip(listed) {
+            let entry = match rule {
+                Rule::Everything => Some("*".to_string()),
+                Rule::Local | Rule::Glob(..) => None,
+                Rule::Exact(host, port) | Rule::Suffix(host, port) => Some(with_port(host, *port)),
+                Rule::Network(network, None) => Some(network.to_string()),
+                Rule::Network(_, Some(_)) => None,
+                Rule::Address(address, port) => Some(with_port(&address.to_string(), *port)),
+            };
+            match entry {
+                Some(entry) => list.entries.push(entry),
+                None => list.unexpressed.push(text.clone()),
+            }
+        }
+        list.unexpressed.extend(self.skipped.iter().cloned());
+        list
+    }
+
     pub(crate) fn matches_target(&self, target: &Target) -> bool {
         if self.loopback && is_loopback(target) {
             return true;
         }
         let listed = self.rules.iter().any(|rule| rule.matches(target));
         listed != self.reversed
+    }
+}
+
+/// A bypass list in `NO_PROXY` form.
+#[derive(Debug, Default)]
+pub(crate) struct NoProxyList {
+    pub entries: Vec<String>,
+    pub unexpressed: Vec<String>,
+}
+
+fn with_port(host: &str, port: Option<u16>) -> String {
+    match port {
+        Some(port) => crate::proxy::join_host_port(host, port),
+        None => host.to_string(),
     }
 }
 

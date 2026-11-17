@@ -23,5 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   client certificates chosen by the CAs a server names, from `Selector`s over Windows CNG stores,
   the macOS Keychain and PKCS #11 modules (feature `pkcs11`), with the `AutoSelectCertificateForUrls`
   policy of Chrome and Edge.
+- `Resolver::child_environment`: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for a child process
+  from the proxy the resolver decides, loopback and the bypass list included; a PAC script or
+  WPAD is resolved for the endpoints the caller names, and `ChildEnvironment` reports what the
+  variables cannot say.
 - `client::AgentBuilder` (feature `ureq`): a `ureq` agent that follows the system's proxy, proxy
   login and TLS.

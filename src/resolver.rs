@@ -23,6 +23,7 @@ use crate::env::{Environment, Source};
 use crate::error::Error;
 use crate::proxy::{Credentials, Proxy, ProxyScheme, Route, Target};
 use crate::system::{SettingsState, SystemSettings};
+pub use child::ChildEnvironment;
 
 /// How long the system's settings are trusted before they are read again.
 const SETTINGS_MAX_AGE: Duration = Duration::from_secs(60);
@@ -552,5 +553,6 @@ impl SystemSource {
     }
 }
 
+mod child;
 #[cfg(test)]
 mod tests;

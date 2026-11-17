@@ -17,7 +17,7 @@ MSRV Rust 1.89, edition 2024. A default build depends on `http`, `percent-encodi
 `thiserror`, `tracing`, `coqui-net-acl` and, on Windows, `windows-sys`. `coqui-net-acl` is a git
 dependency pinned by revision.
 
-Root re-exports: `Resolver`, `ResolverBuilder`, `ProxySetting`, `OnMissingEngine`, `Route`,
+Root re-exports: `Resolver`, `ResolverBuilder`, `ChildEnvironment`, `ProxySetting`, `OnMissingEngine`, `Route`,
 `Proxy`, `ProxyBuilder`, `ProxyScheme`, `Credentials`, `Secret`, `BypassRules`, `Dialect`,
 `Environment`, `ProxyVariables`, `ProxyConnector`, `ProxyConnectorBuilder`, `Connection`,
 `Negotiate`, `NegotiateBuilder`, `Error`, `Reason`. Public modules: `auth`, `system`, and, behind
@@ -90,6 +90,44 @@ impl Route { pub fn parse_pac_result(text: &str) -> Vec<Route>; }
 
 `parse_pac_result` reads `DIRECT`, `PROXY`, `HTTP`, `HTTPS`, `SOCKS` (SOCKS 4), `SOCKS4`, `SOCKS5`,
 case-blind; an entry with an unknown keyword or no host is dropped; nothing usable is `[Direct]`.
+
+## Child processes (`coqui_syshttp`)
+
+```rust
+impl Resolver {
+    pub fn child_environment<S: AsRef<str>>(&self, endpoints: impl IntoIterator<Item = S>)
+        -> Result<ChildEnvironment, Error>;
+}
+impl ChildEnvironment {   // Clone, Eq; Debug masks credentials
+    pub fn pairs(&self) -> Vec<(String, String)>;
+    pub fn http_proxy(&self) -> Option<&Proxy>;  pub fn https_proxy(&self) -> Option<&Proxy>;
+    pub fn no_proxy(&self) -> &[String];
+    pub fn per_endpoint(&self) -> bool;
+    pub fn unexpressed(&self) -> &[String];
+}
+```
+
+The variables a program you start needs, from what the resolver decides. A proxy that one setting
+names for every host (`proxy(...)`, the proxy variables, the system's manual proxies) becomes
+`HTTP_PROXY` or `HTTPS_PROXY`, with its credentials percent-encoded in the URL; the bypass list and
+loopback (`localhost,127.0.0.1,::1`, unless `<-loopback>`) become `NO_PROXY`. `pairs()` also gives the
+lowercase names where names are case-sensitive (some programs read only `http_proxy`), and is empty
+when everything goes direct (`NO_PROXY` alone is never given).
+
+A proxy chosen per URL (a PAC script, WPAD, a KDE list naming the hosts that use the proxy)
+cannot be one variable, so it is asked about `endpoints`, the URLs the child will use:
+`per_endpoint()` is then true; the first proxy answered for a scheme is set for it; an endpoint
+answered direct is added to `NO_PROXY` by host; an endpoint answered with a different proxy is
+listed in `unexpressed()`. With no endpoints a per-URL proxy sets nothing. Every endpoint is also
+checked against a proxy that every host uses, so an endpoint covered by a bypass rule `NO_PROXY`
+cannot spell (`<local>`, a glob) is still added by host.
+
+Not expressible, and listed in `unexpressed()`: a bypass entry that is `<local>`, a glob, a network
+with a port, or unreadable; an exact host of the WinINet or macOS lists is written as a bare name,
+which `NO_PROXY` reads as the host and its subdomains (a widening); a SOCKS proxy is not written
+at all (programs differ on it), and `ws:`/`wss:` endpoints count as `http:`/`https:`. An endpoint
+that is not a URL with a scheme and host is `Error::Parse`. The resolver's `credentials` are in the
+URLs, so the child's environment holds a secret: set it on the child only.
 
 ## Proxies and credentials (`coqui_syshttp`)
 
