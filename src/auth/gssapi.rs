@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use libgssapi::context::{ClientCtx, CtxFlags, SecurityContext};
+use libgssapi::context::{ClientCtx, CtxFlags};
 use libgssapi::credential::{Cred, CredUsage};
 use libgssapi::name::Name;
 use libgssapi::oid::{GSS_MECH_SPNEGO, GSS_NT_HOSTBASED_SERVICE, GSS_NT_USER_NAME, Oid};
@@ -46,13 +46,16 @@ impl GssapiClient {
     ) -> Result<Self, Error> {
         let target = Name::new(
             alloc::format!("HTTP@{host}").as_bytes(),
-            Some(&GSS_NT_HOSTBASED_SERVICE),
+            Some(GSS_NT_HOSTBASED_SERVICE.clone()),
         )
         .map_err(|error| failure("naming the service", &error))?;
         let cred = match credentials {
             Some(credentials) => {
-                let user = Name::new(credentials.username().as_bytes(), Some(&GSS_NT_USER_NAME))
-                    .map_err(|error| failure("naming the user", &error))?;
+                let user = Name::new(
+                    credentials.username().as_bytes(),
+                    Some(GSS_NT_USER_NAME.clone()),
+                )
+                .map_err(|error| failure("naming the user", &error))?;
                 Some(
                     Cred::acquire_with_password(
                         Some(&user),
