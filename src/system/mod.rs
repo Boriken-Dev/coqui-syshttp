@@ -84,48 +84,15 @@ pub struct SystemSettings {
 }
 
 impl SystemSettings {
-    /// Settings that say `state`, to be filled in with the methods below.
-    pub fn new(source: SettingsSource, state: SettingsState) -> Self {
-        Self {
-            source,
-            state,
-            ..Self::default()
+    /// Starts settings that say `state`, read from `source`.
+    pub fn builder(source: SettingsSource, state: SettingsState) -> SystemSettingsBuilder {
+        SystemSettingsBuilder {
+            settings: Self {
+                source,
+                state,
+                ..Self::default()
+            },
         }
-    }
-
-    /// Switches auto-detection (WPAD) on or off.
-    #[must_use]
-    pub fn with_auto_detect(mut self, auto_detect: bool) -> Self {
-        self.auto_detect = auto_detect;
-        self
-    }
-
-    /// Names the location of a PAC script.
-    #[must_use]
-    pub fn with_pac_url(mut self, url: impl Into<String>) -> Self {
-        self.pac_url = Some(url.into());
-        self
-    }
-
-    /// Carries the text of a PAC script.
-    #[must_use]
-    pub fn with_pac_script(mut self, script: impl Into<String>) -> Self {
-        self.pac_script = Some(script.into());
-        self
-    }
-
-    /// Adds the manual proxy for `scheme` (`http`, `https`, `ftp`, or `socks` for the rest).
-    #[must_use]
-    pub fn with_proxy(mut self, scheme: impl Into<String>, proxy: Proxy) -> Self {
-        self.proxies.insert(scheme.into(), proxy);
-        self
-    }
-
-    /// Sets the hosts that bypass the manual proxies.
-    #[must_use]
-    pub fn with_bypass(mut self, bypass: BypassRules) -> Self {
-        self.bypass = bypass;
-        self
     }
 
     /// Reads this machine's settings. With none readable, the default: [`SettingsState::Unset`].
@@ -166,6 +133,50 @@ impl SystemSettings {
                 || alloc::vec![Route::Direct],
                 |proxy| alloc::vec![Route::Proxy(proxy.clone())],
             )
+    }
+}
+
+/// Builds a [`SystemSettings`], for a host that keeps its own proxy settings and for tests.
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct SystemSettingsBuilder {
+    settings: SystemSettings,
+}
+
+impl SystemSettingsBuilder {
+    /// Switches auto-detection (WPAD) on or off.
+    pub fn auto_detect(mut self, auto_detect: bool) -> Self {
+        self.settings.auto_detect = auto_detect;
+        self
+    }
+
+    /// The location of a PAC script.
+    pub fn pac_url(mut self, url: impl Into<String>) -> Self {
+        self.settings.pac_url = Some(url.into());
+        self
+    }
+
+    /// The text of a PAC script.
+    pub fn pac_script(mut self, script: impl Into<String>) -> Self {
+        self.settings.pac_script = Some(script.into());
+        self
+    }
+
+    /// The manual proxy for `scheme` (`http`, `https`, `ftp`, or `socks` for the rest).
+    pub fn proxy(mut self, scheme: impl Into<String>, proxy: Proxy) -> Self {
+        self.settings.proxies.insert(scheme.into(), proxy);
+        self
+    }
+
+    /// The hosts that bypass the manual proxies.
+    pub fn bypass(mut self, bypass: BypassRules) -> Self {
+        self.settings.bypass = bypass;
+        self
+    }
+
+    /// The settings.
+    pub fn build(self) -> SystemSettings {
+        self.settings
     }
 }
 

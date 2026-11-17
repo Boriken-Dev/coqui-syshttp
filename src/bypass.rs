@@ -24,6 +24,8 @@ pub enum Dialect {
     GSettings,
     /// KDE `NoProxyFor`; a bare name covers its subdomains.
     Kde,
+    /// KDE `NoProxyFor` with `ReversedException=true`: the list names the hosts that use the proxy.
+    KdeReversed,
 }
 
 impl Dialect {
@@ -32,7 +34,7 @@ impl Dialect {
     }
 
     fn covers_subdomains(self) -> bool {
-        matches!(self, Self::NoProxy | Self::Kde)
+        matches!(self, Self::NoProxy | Self::Kde | Self::KdeReversed)
     }
 }
 
@@ -131,7 +133,10 @@ impl BypassRules {
             .filter(|entry| !entry.is_empty())
             .collect();
         let whole_star = entries == ["*"];
-        let mut rules = Self::default();
+        let mut rules = Self {
+            reversed: dialect == Dialect::KdeReversed,
+            ..Self::default()
+        };
         for entry in entries {
             let token = entry.to_ascii_lowercase();
             if token == "<-loopback>" {
@@ -155,13 +160,6 @@ impl BypassRules {
         rules
     }
 
-    /// Makes the list name the hosts that use the proxy, as KDE's `ReversedException` does.
-    #[must_use]
-    pub fn reversed(mut self, reversed: bool) -> Self {
-        self.reversed = reversed;
-        self
-    }
-
     /// The entries that were read.
     pub fn entries(&self) -> impl Iterator<Item = &str> {
         self.entries.iter().map(String::as_str)
@@ -175,20 +173,6 @@ impl BypassRules {
     /// Whether the list has no entry that can match (loopback still bypasses).
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
-    }
-
-    /// This list followed by `other`'s entries; loopback bypasses unless either list turned it off.
-    ///
-    /// # Panics
-    ///
-    /// Never; a reversed list keeps this list's direction.
-    #[must_use]
-    pub fn combined(mut self, other: &Self) -> Self {
-        self.rules.extend(other.rules.iter().cloned());
-        self.entries.extend(other.entries.iter().cloned());
-        self.skipped.extend(other.skipped.iter().cloned());
-        self.loopback &= other.loopback;
-        self
     }
 
     /// Whether `url` goes direct. A URL that cannot be read never matches.
@@ -367,7 +351,7 @@ mod tests {
 
     #[test]
     fn a_reversed_list_names_the_hosts_that_use_the_proxy() {
-        let list = BypassRules::parse("corp.example", Dialect::Kde).reversed(true);
+        let list = BypassRules::parse("corp.example", Dialect::KdeReversed);
         assert!(!list.matches("http://corp.example/"));
         assert!(list.matches("http://other.example/"));
         assert!(list.matches("http://localhost/"));

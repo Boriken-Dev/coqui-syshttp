@@ -190,7 +190,11 @@ pub(crate) fn kde_from(section: &BTreeMap<String, String>) -> Option<SystemSetti
                 }
             }
             let overrides: Vec<&str> = get("noproxyfor").split(',').map(str::trim).collect();
-            let reversed = get("reversedexception").trim().eq_ignore_ascii_case("true");
+            let dialect = if get("reversedexception").trim().eq_ignore_ascii_case("true") {
+                Dialect::KdeReversed
+            } else {
+                Dialect::Kde
+            };
             Some(SystemSettings {
                 source,
                 state: if proxies.is_empty() {
@@ -199,7 +203,7 @@ pub(crate) fn kde_from(section: &BTreeMap<String, String>) -> Option<SystemSetti
                     SettingsState::Configured
                 },
                 proxies,
-                bypass: BypassRules::from_entries(overrides, Dialect::Kde).reversed(reversed),
+                bypass: BypassRules::from_entries(overrides, dialect),
                 ..SystemSettings::default()
             })
         }

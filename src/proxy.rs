@@ -167,7 +167,7 @@ impl Proxy {
 
     /// This proxy with `credentials`, unless it already has some.
     #[must_use]
-    pub fn or_credentials(mut self, credentials: Option<&Credentials>) -> Self {
+    pub(crate) fn or_credentials(mut self, credentials: Option<&Credentials>) -> Self {
         if self.credentials.is_none() {
             self.credentials = credentials.cloned();
         }

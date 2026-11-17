@@ -55,8 +55,9 @@ fn world(source: impl FnOnce(&Leaf) -> Box<dyn IdentitySource>) -> World {
         ),
     )
     .unwrap();
-    let settings = SystemSettings::new(SettingsSource::Windows, SettingsState::Configured)
-        .with_pac_url(path.to_string_lossy());
+    let settings = SystemSettings::builder(SettingsSource::Windows, SettingsState::Configured)
+        .pac_url(path.to_string_lossy())
+        .build();
     let resolver = Resolver::builder()
         .environment(Environment::default())
         .settings(settings)

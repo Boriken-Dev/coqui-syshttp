@@ -101,7 +101,6 @@ impl Proxy {
     pub fn scheme(&self) -> ProxyScheme;  pub fn host(&self) -> &str;  pub fn port(&self) -> u16;
     pub fn credentials(&self) -> Option<&Credentials>;
     pub fn headers(&self) -> impl Iterator<Item = (&str, &str)>;
-    pub fn or_credentials(self, Option<&Credentials>) -> Proxy;   // keeps credentials it has
     pub fn authority(&self) -> String;                // host:port, IPv6 bracketed
     pub fn url_with_credentials(&self) -> String;     // for a child process's environment
 }
@@ -127,12 +126,11 @@ and header values never appear in `Debug` or `Display`.
 impl BypassRules {
     pub fn none() -> Self;  pub fn parse(&str, Dialect) -> Self;
     pub fn from_entries<'a>(impl IntoIterator<Item = &'a str>, Dialect) -> Self;
-    pub fn reversed(self, bool) -> Self;              // KDE ReversedException
     pub fn entries(&self) -> impl Iterator<Item = &str>;  pub fn skipped(&self) -> impl Iterator<Item = &str>;
-    pub fn is_empty(&self) -> bool;  pub fn combined(self, &BypassRules) -> Self;
+    pub fn is_empty(&self) -> bool;
     pub fn matches(&self, url: &str) -> bool;
 }
-pub enum Dialect { NoProxy, WinInet, MacOs, GSettings, Kde }   // non_exhaustive
+pub enum Dialect { NoProxy, WinInet, MacOs, GSettings, Kde, KdeReversed }   // non_exhaustive; KdeReversed names the hosts that use the proxy
 impl Environment {
     pub fn process() -> Self;  pub fn from_pairs(impl IntoIterator<Item = (K, V)>) -> Self;
     pub fn get(&self, name: &str) -> Option<&str>;
@@ -157,11 +155,13 @@ pub struct SystemSettings { pub source, pub state, pub auto_detect: bool, pub pa
     pub pac_script: Option<String>, pub proxies: BTreeMap<String, Proxy>, pub bypass: BypassRules }  // non_exhaustive
 impl SystemSettings {
     pub fn read() -> SystemSettings;                  // default (state Unset) when nothing is readable
-    pub fn new(SettingsSource, SettingsState) -> Self;
-    pub fn with_auto_detect(self, bool) -> Self;  pub fn with_pac_url(self, impl Into<String>) -> Self;
-    pub fn with_pac_script(self, impl Into<String>) -> Self;
-    pub fn with_proxy(self, impl Into<String> /* http|https|ftp|socks */, Proxy) -> Self;
-    pub fn with_bypass(self, BypassRules) -> Self;
+    pub fn builder(SettingsSource, SettingsState) -> SystemSettingsBuilder;
+}
+impl SystemSettingsBuilder {
+    pub fn auto_detect(self, bool) -> Self;  pub fn pac_url(self, impl Into<String>) -> Self;
+    pub fn pac_script(self, impl Into<String>) -> Self;
+    pub fn proxy(self, impl Into<String> /* http|https|ftp|socks */, Proxy) -> Self;
+    pub fn bypass(self, BypassRules) -> Self;  pub fn build(self) -> SystemSettings;
 }
 pub enum SettingsSource { None, Windows, MacOs, Gnome, Mate, Kde, NetworkManager }   // non_exhaustive
 pub enum SettingsState { Direct, Configured, Unset }                                  // non_exhaustive
