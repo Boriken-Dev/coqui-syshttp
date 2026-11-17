@@ -46,16 +46,13 @@ impl GssapiClient {
     ) -> Result<Self, Error> {
         let target = Name::new(
             alloc::format!("HTTP@{host}").as_bytes(),
-            Some(GSS_NT_HOSTBASED_SERVICE.clone()),
+            Some(GSS_NT_HOSTBASED_SERVICE),
         )
         .map_err(|error| failure("naming the service", &error))?;
         let cred = match credentials {
             Some(credentials) => {
-                let user = Name::new(
-                    credentials.username().as_bytes(),
-                    Some(GSS_NT_USER_NAME.clone()),
-                )
-                .map_err(|error| failure("naming the user", &error))?;
+                let user = Name::new(credentials.username().as_bytes(), Some(GSS_NT_USER_NAME))
+                    .map_err(|error| failure("naming the user", &error))?;
                 Some(
                     Cred::acquire_with_password(
                         Some(&user),
@@ -70,8 +67,8 @@ impl GssapiClient {
             None => None,
         };
         let mechanism = match scheme {
-            Scheme::Negotiate => GSS_MECH_SPNEGO.clone(),
-            Scheme::Ntlm => GSS_MECH_NTLM.clone(),
+            Scheme::Negotiate => GSS_MECH_SPNEGO,
+            Scheme::Ntlm => GSS_MECH_NTLM,
         };
         Ok(Self {
             context: ClientCtx::new(cred, target, CtxFlags::empty(), Some(mechanism)),

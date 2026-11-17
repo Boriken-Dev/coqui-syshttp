@@ -215,6 +215,7 @@ pub(crate) fn proxy_at(host: &str, port: &str, scheme: ProxyScheme) -> Option<Pr
 /// Proxies from `host:port` (every scheme) or `scheme=host:port` entries separated by `;` or
 /// spaces: the Windows `ProxyServer` form. An `https=` or `ftp=` entry is an HTTP proxy for
 /// that scheme; a `socks=` entry is a SOCKS proxy of `socks`.
+#[cfg(any(windows, test))]
 pub(crate) fn parse_proxy_list(text: &str, socks: ProxyScheme) -> BTreeMap<String, Proxy> {
     let mut proxies = BTreeMap::new();
     for token in text
