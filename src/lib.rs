@@ -21,6 +21,8 @@ pub mod pac;
 mod proxy;
 mod resolver;
 pub mod system;
+#[cfg(feature = "tls")]
+pub mod tls;
 
 pub use auth::{Negotiate, NegotiateBuilder};
 pub use bypass::{BypassRules, Dialect};
