@@ -192,6 +192,7 @@ pub fn rules_from_policy<'a>(entries: impl IntoIterator<Item = &'a str>) -> Vec<
         .collect()
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
 const POLICY: &str = "AutoSelectCertificateForUrls";
 
 /// The `AutoSelectCertificateForUrls` rules set for Edge, Chrome and Chromium on this machine,

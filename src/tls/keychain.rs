@@ -32,12 +32,18 @@ impl KeychainSource {
 
 impl IdentitySource for KeychainSource {
     fn identities(&self) -> Result<Vec<Identity>, Error> {
-        let results = ItemSearchOptions::new()
+        // errSecItemNotFound: a keychain with no identity is an empty list, not a failure.
+        const NOT_FOUND: i32 = -25300;
+        let results = match ItemSearchOptions::new()
             .class(ItemClass::identity())
             .load_refs(true)
             .limit(Limit::All)
             .search()
-            .map_err(|error| Error::Tls(Reason::new(alloc::format!("keychain: {error}"))))?;
+        {
+            Ok(results) => results,
+            Err(error) if error.code() == NOT_FOUND => Vec::new(),
+            Err(error) => return Err(Error::Tls(Reason::new(alloc::format!("keychain: {error}")))),
+        };
         let mut found = Vec::new();
         for result in results {
             let SearchResult::Ref(Reference::Identity(identity)) = result else {
