@@ -1,0 +1,104 @@
+name: Release
+
+# Runs when a version tag (v1.0.0, v1.0.0-rc.1) is pushed: a release gate, not general CI. docs.rs
+# builds the API documentation when the crate is published.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.toolchain }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        toolchain: [stable, "1.89"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+      - name: GSSAPI development files
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev libclang-dev
+      - run: cargo test --all-features
+
+  build:
+    name: Package crate
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: GSSAPI development files
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev libclang-dev
+      - name: Package (validates the publishable crate)
+        run: cargo package --all-features
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: target/package/*.crate
+
+  github-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Extract CHANGELOG.md section for this tag
+        shell: python
+        run: |
+          import pathlib
+          import re
+          import sys
+
+          tag = "${{ github.ref_name }}"
+          version = tag[1:] if tag.startswith("v") else tag
+
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]:\s|\Z)",
+              changelog,
+              re.DOTALL | re.MULTILINE,
+          )
+          if not match:
+              sys.exit(f"No CHANGELOG.md section found for version {version!r}")
+          pathlib.Path("release_notes.md").write_text(match.group(1).strip() + "\n", encoding="utf-8")
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: release_notes.md
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: github-release
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/coqui-syshttp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: GSSAPI development files
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev libclang-dev
+      - name: Publish
+        run: cargo publish --all-features --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

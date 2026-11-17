@@ -1,0 +1,59 @@
+name: Test
+
+# On demand: a manual run (with a ref), or a throwaway ci-* tag or branch that is deleted after the
+# run. Not triggered by pushes or pull requests.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "ci-*"
+    branches: ["ci-*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.toolchain }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        toolchain: [stable, "1.89"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # The `negotiate` feature links the system's GSSAPI library and generates its bindings.
+      - name: GSSAPI development files
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev libclang-dev
+      - name: Format check
+        run: cargo fmt --check
+      - name: Clippy, every feature
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy, no features
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Build without default features
+        run: cargo build --no-default-features
+      - name: Tests
+        run: cargo test --all-features
+      - name: Documentation
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
