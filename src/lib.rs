@@ -12,6 +12,8 @@ extern crate alloc;
 
 pub mod auth;
 mod bypass;
+#[cfg(feature = "ureq")]
+pub mod client;
 mod connect;
 mod env;
 mod error;
