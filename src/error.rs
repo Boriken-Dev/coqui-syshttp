@@ -30,7 +30,7 @@ pub enum Error {
     #[error("proxy refused the connection: {0}")]
     Refused(Reason),
     /// A proxy or a server refused the credentials, or a Negotiate or NTLM exchange failed.
-    #[error("proxy login failed: {0}")]
+    #[error("login failed: {0}")]
     Login(Reason),
     /// Every proxy offered speaks a protocol this client cannot use (SOCKS, for one).
     #[error("no usable proxy: {0}")]
