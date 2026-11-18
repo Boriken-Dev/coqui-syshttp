@@ -23,6 +23,7 @@ mod netutil;
 pub mod pac;
 mod proxy;
 mod resolver;
+mod socks;
 pub mod system;
 #[cfg(feature = "tls")]
 pub mod tls;

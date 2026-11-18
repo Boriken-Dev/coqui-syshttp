@@ -1,5 +1,5 @@
-//! Connecting through a proxy: a direct connection, or an HTTP `CONNECT` tunnel logged in with
-//! Basic credentials, a proxy's extra headers, or Negotiate and NTLM.
+//! Connecting through a proxy: a direct connection, an HTTP `CONNECT` tunnel logged in with
+//! Basic credentials, a proxy's extra headers, or Negotiate and NTLM, or a SOCKS tunnel.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -155,8 +155,7 @@ impl ProxyConnector {
     /// # Errors
     ///
     /// [`Error::Io`] when a connection fails, [`Error::Login`] when the proxy refuses the
-    /// credentials, [`Error::Refused`] for any other refusal, and [`Error::Unsupported`] for a
-    /// SOCKS proxy.
+    /// credentials, and [`Error::Refused`] for any other refusal.
     pub fn connect(&self, route: &Route, host: &str, port: u16) -> Result<Connection, Error> {
         match route {
             Route::Direct => self.connect_tcp(host, port).map(Connection::Tcp),
@@ -214,12 +213,11 @@ impl ProxyConnector {
     }
 
     fn tunnel(&self, proxy: &Proxy, host: &str, port: u16) -> Result<Connection, Error> {
-        let tcp = match proxy.scheme() {
-            ProxyScheme::Http | ProxyScheme::Https => {
-                self.connect_tcp(proxy.host(), proxy.port())?
-            }
-            _ => return Err(Error::Unsupported(Reason::new("a SOCKS proxy"))),
-        };
+        let mut tcp = self.connect_tcp(proxy.host(), proxy.port())?;
+        if matches!(proxy.scheme(), ProxyScheme::Socks4 | ProxyScheme::Socks5) {
+            crate::socks::connect(&mut tcp, proxy.scheme(), proxy.credentials(), host, port)?;
+            return Ok(Connection::Tcp(tcp));
+        }
         let mut connection = if proxy.scheme() == ProxyScheme::Https {
             self.wrap_tls(tcp, proxy)?
         } else {

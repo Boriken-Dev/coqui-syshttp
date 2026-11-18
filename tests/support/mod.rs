@@ -301,6 +301,7 @@ pub mod cng_store;
 pub mod login_origin;
 #[cfg(feature = "tls")]
 pub mod pki;
+pub mod socks_server;
 #[cfg(all(windows, feature = "negotiate"))]
 pub mod sspi_server;
 #[cfg(feature = "tls")]
