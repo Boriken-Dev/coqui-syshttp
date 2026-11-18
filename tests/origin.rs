@@ -180,6 +180,7 @@ mod security {
         let origin = LoginOrigin::start(Demand::Security("NTLM"));
         let client = OriginAgent::new(agent(true), negotiate());
         let request = Request::post(origin.url("127.0.0.1", "/ews"))
+            .header(header::CONTENT_LENGTH, "23")
             .body(b"<soap>0123456789</soap>".to_vec())
             .unwrap();
         let response = client.run(request).expect("a login");

@@ -468,6 +468,13 @@ fn request_of<B>(
     *request.uri_mut() = parts.uri.clone();
     *request.version_mut() = parts.version;
     *request.headers_mut() = parts.headers.clone();
+    // `ureq` states the length of the body each leg carries, which is not the first leg's.
+    request
+        .headers_mut()
+        .remove(ureq::http::header::CONTENT_LENGTH);
+    request
+        .headers_mut()
+        .remove(ureq::http::header::TRANSFER_ENCODING);
     *request.extensions_mut() = parts.extensions.clone();
     if let Some(value) = authorization
         && let Ok(mut value) = ureq::http::HeaderValue::from_str(value)
