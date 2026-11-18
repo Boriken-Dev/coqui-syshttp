@@ -5,8 +5,9 @@
 //! a [`ProxyConnector`] and, for `https:`, speaks TLS with a [`Tls`]. A plain `http:` URL through
 //! a proxy is tunnelled with `CONNECT`, as `ureq` does for every proxy.
 
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 use core::time::Duration;
 use std::io::{self, Read, Write};
@@ -20,6 +21,7 @@ use ureq::unversioned::transport::{
     Buffers, ConnectionDetails, Connector, LazyBuffers, NextTimeout, Transport,
 };
 
+use crate::auth::OriginAuth;
 use crate::connect::{Connection, ProxyConnector};
 use crate::error::Error;
 use crate::resolver::Resolver;
@@ -317,4 +319,176 @@ impl Transport for StreamTransport {
     fn is_tls(&self) -> bool {
         matches!(self.io, Io::Tls(_))
     }
+}
+
+/// A `ureq` agent that answers an origin server's `401` with Basic, Negotiate or NTLM, as an
+/// [`OriginAuth`] says.
+///
+/// `ureq` runs a request once, and its middleware cannot send it again, so this wraps the agent
+/// and runs the requests whose server has a rule itself: it sends the request, answers a `401`
+/// with the next leg of the login and sends it again, on the agent's pooled connection, which an
+/// NTLM login needs. The body is sent from memory once per leg, so a request is given as bytes.
+/// A request to a server with no rule, or one that already holds an `Authorization` header, is
+/// sent as it is.
+///
+/// A `401` that comes from another host than the request's (after a redirect) is not answered:
+/// the login belongs to the host that was asked.
+#[derive(Debug, Clone)]
+pub struct OriginAgent {
+    agent: ureq::Agent,
+    auth: Arc<OriginAuth>,
+}
+
+impl OriginAgent {
+    /// Wraps `agent` with the logins `auth` describes.
+    pub fn new(agent: ureq::Agent, auth: OriginAuth) -> Self {
+        Self {
+            agent,
+            auth: Arc::new(auth),
+        }
+    }
+
+    /// The agent underneath, for requests that need no login.
+    pub fn agent(&self) -> &ureq::Agent {
+        &self.agent
+    }
+
+    /// Runs `request`, answering a `401` as the policy says.
+    ///
+    /// The agent's `http_status_as_error` setting applies to the final reply, as for the agent
+    /// itself; a per-request setting is replaced by the agent's for a server with a rule.
+    ///
+    /// # Errors
+    ///
+    /// What `ureq` reports, and a failed login as an I/O error of kind `PermissionDenied`.
+    pub fn run(
+        &self,
+        request: ureq::http::Request<impl AsRef<[u8]>>,
+    ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+        use ureq::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
+
+        let (parts, body) = request.into_parts();
+        let body = body.as_ref();
+        let login = if parts.headers.contains_key(AUTHORIZATION) {
+            None
+        } else {
+            self.auth
+                .login(&parts.uri.to_string())
+                .map_err(login_error)?
+        };
+        let Some(mut login) = login else {
+            return self.send(&parts, None, body, false);
+        };
+        let host = parts.uri.host().map(str::to_ascii_lowercase);
+        let status_as_error = self.agent.config().http_status_as_error();
+        let mut answer: Option<crate::auth::Answer> = None;
+        loop {
+            let authorization = answer.as_ref().map(crate::auth::Answer::authorization);
+            let probe = answer.as_ref().is_some_and(crate::auth::Answer::probe);
+            let mut response =
+                self.send(&parts, authorization, if probe { &[] } else { body }, true)?;
+            let values: Vec<String> = response
+                .headers()
+                .get_all(WWW_AUTHENTICATE)
+                .iter()
+                .filter_map(|value| value.to_str().ok().map(str::to_string))
+                .collect();
+            let values: Vec<&str> = values.iter().map(String::as_str).collect();
+            let theirs = ureq::ResponseExt::get_uri(&response)
+                .host()
+                .map(str::to_ascii_lowercase)
+                == host;
+            if response.status() == ureq::http::StatusCode::UNAUTHORIZED && theirs {
+                if let Some(next) = login.answer(&values).map_err(login_error)? {
+                    drain(&mut response, self.auth.max_body());
+                    answer = Some(next);
+                    continue;
+                }
+            } else if theirs {
+                login.finish(&values).map_err(login_error)?;
+            }
+            let status = response.status();
+            if status_as_error && (status.is_client_error() || status.is_server_error()) {
+                return Err(ureq::Error::StatusCode(status.as_u16()));
+            }
+            return Ok(response);
+        }
+    }
+
+    /// One request of `parts` and `body`; with `leg` a client or server error is a reply, not an
+    /// error, so the caller can read a `401`.
+    fn send(
+        &self,
+        parts: &ureq::http::request::Parts,
+        authorization: Option<&str>,
+        body: &[u8],
+        leg: bool,
+    ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+        fn run_one<B: ureq::AsSendBody>(
+            agent: &ureq::Agent,
+            request: ureq::http::Request<B>,
+            leg: bool,
+        ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+            if leg {
+                agent.run(
+                    agent
+                        .configure_request(request)
+                        .http_status_as_error(false)
+                        .build(),
+                )
+            } else {
+                agent.run(request)
+            }
+        }
+        // A body-less POST still says so (`Content-Length: 0`); `ureq` would send it chunked.
+        let carries_body = matches!(
+            parts.method,
+            ureq::http::Method::POST | ureq::http::Method::PUT | ureq::http::Method::PATCH
+        );
+        if body.is_empty() && !carries_body {
+            run_one(&self.agent, request_of(parts, authorization, ()), leg)
+        } else {
+            run_one(
+                &self.agent,
+                request_of(parts, authorization, body.to_vec()),
+                leg,
+            )
+        }
+    }
+}
+
+/// A request made of `parts` and `body`, with `authorization` set when given.
+fn request_of<B>(
+    parts: &ureq::http::request::Parts,
+    authorization: Option<&str>,
+    body: B,
+) -> ureq::http::Request<B> {
+    let mut request = ureq::http::Request::new(body);
+    *request.method_mut() = parts.method.clone();
+    *request.uri_mut() = parts.uri.clone();
+    *request.version_mut() = parts.version;
+    *request.headers_mut() = parts.headers.clone();
+    *request.extensions_mut() = parts.extensions.clone();
+    if let Some(value) = authorization
+        && let Ok(mut value) = ureq::http::HeaderValue::from_str(value)
+    {
+        value.set_sensitive(true);
+        request
+            .headers_mut()
+            .insert(ureq::http::header::AUTHORIZATION, value);
+    }
+    request
+}
+
+/// Reads and drops a reply's body, up to `limit` bytes, so the connection can carry the next leg.
+fn drain(response: &mut ureq::http::Response<ureq::Body>, limit: usize) {
+    let mut reader = response.body_mut().as_reader();
+    let _ = io::copy(&mut Read::take(&mut reader, limit as u64), &mut io::sink());
+}
+
+fn login_error(error: Error) -> ureq::Error {
+    ureq::Error::Io(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        error.to_string(),
+    ))
 }

@@ -297,6 +297,8 @@ pub fn get(stream: &mut (impl Read + Write), host: &str) -> String {
 
 #[cfg(all(windows, feature = "tls"))]
 pub mod cng_store;
+#[cfg(feature = "ureq")]
+pub mod login_origin;
 #[cfg(feature = "tls")]
 pub mod pki;
 #[cfg(all(windows, feature = "negotiate"))]

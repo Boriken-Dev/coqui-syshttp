@@ -13,6 +13,8 @@ use crate::proxy::Credentials;
 
 #[cfg(all(unix, feature = "negotiate"))]
 mod gssapi;
+mod origin;
+pub use origin::{Answer, DEFAULT_MAX_BODY, OriginAuth, OriginAuthBuilder, OriginLogin};
 #[cfg(all(windows, feature = "negotiate"))]
 #[expect(
     unsafe_code,
@@ -105,15 +107,9 @@ impl Negotiate {
     /// Whether the proxy whose host name is `host` is logged in to.
     pub fn wants_proxy(&self, host: &str) -> bool {
         let host = normalise(host);
-        self.proxies.iter().any(|pattern| {
-            pattern == "*"
-                || pattern
-                    .strip_prefix("*.")
-                    .map_or(*pattern == host, |suffix| {
-                        host.strip_suffix(suffix)
-                            .is_some_and(|front| front.ends_with('.'))
-                    })
-        })
+        self.proxies
+            .iter()
+            .any(|pattern| pattern_matches(pattern, &host))
     }
 
     /// The identity to log in with; `None` means the logon session (SSPI) or the Kerberos
@@ -139,26 +135,52 @@ impl Negotiate {
 
     /// Refuses a plain-http handshake with a host that is not loopback unless allowed.
     pub(crate) fn check_transport(&self, host: &str, secure: bool) -> Result<(), Error> {
-        if secure || self.plain_http {
-            return Ok(());
-        }
-        let host = normalise(host);
-        let loopback = host == "localhost"
-            || host.strip_suffix(".localhost").is_some()
-            || host
-                .parse::<IpAddr>()
-                .is_ok_and(|address| address.is_loopback());
-        if loopback {
-            Ok(())
-        } else {
-            Err(Error::Login(Reason::new(
-                "a Negotiate login over plain http is refused; allow it with plain_http(true)",
-            )))
-        }
+        check_plain(self.plain_http, host, secure)
     }
 }
 
-fn normalise(host: &str) -> String {
+/// Refuses a login sent over plain `http:` to a host that is not loopback, unless `allowed`.
+pub(crate) fn check_plain(allowed: bool, host: &str, secure: bool) -> Result<(), Error> {
+    if secure || allowed {
+        return Ok(());
+    }
+    let host = normalise(host);
+    let loopback = host == "localhost"
+        || host.strip_suffix(".localhost").is_some()
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    if loopback {
+        Ok(())
+    } else {
+        Err(Error::Login(Reason::new(
+            "a login over plain http is refused; allow it with plain_http(true)",
+        )))
+    }
+}
+
+/// Whether `pattern` (a normalised name, `*.suffix` or `*`) covers the normalised `host`.
+pub(crate) fn pattern_matches(pattern: &str, host: &str) -> bool {
+    pattern == "*"
+        || pattern
+            .strip_prefix("*.")
+            .map_or(pattern == host, |suffix| {
+                host.strip_suffix(suffix)
+                    .is_some_and(|front| front.ends_with('.'))
+            })
+}
+
+/// Whether `pattern` (already normalised) is a name, `*.suffix` or `*` a policy can hold.
+pub(crate) fn pattern_is_valid(pattern: &str) -> bool {
+    let name = pattern.strip_prefix("*.").unwrap_or(pattern);
+    pattern == "*"
+        || (!name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | ':')))
+}
+
+pub(crate) fn normalise(host: &str) -> String {
     host.trim()
         .trim_start_matches('[')
         .trim_end_matches(']')
@@ -212,16 +234,12 @@ impl NegotiateBuilder {
     /// limit of zero, or an identity with a line break.
     pub fn build(self) -> Result<Negotiate, Error> {
         let policy = self.policy;
-        for pattern in &policy.proxies {
-            let name = pattern.strip_prefix("*.").unwrap_or(pattern);
-            let valid = pattern == "*"
-                || (!name.is_empty()
-                    && name
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | ':')));
-            if !valid {
-                return Err(Error::Parse("negotiate host"));
-            }
+        if !policy
+            .proxies
+            .iter()
+            .all(|pattern| pattern_is_valid(pattern))
+        {
+            return Err(Error::Parse("negotiate host"));
         }
         if policy.max_legs == 0 || policy.max_token == 0 {
             return Err(Error::Parse("negotiate limit"));

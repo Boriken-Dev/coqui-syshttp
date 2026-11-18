@@ -27,7 +27,7 @@ pub mod system;
 #[cfg(feature = "tls")]
 pub mod tls;
 
-pub use auth::{Negotiate, NegotiateBuilder};
+pub use auth::{Negotiate, NegotiateBuilder, OriginAuth, OriginAuthBuilder, OriginLogin};
 pub use bypass::{BypassRules, Dialect};
 pub use connect::{Connection, ProxyConnector, ProxyConnectorBuilder};
 pub use env::{Environment, ProxyVariables};
