@@ -29,3 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   variables cannot say.
 - `client::AgentBuilder` (feature `ureq`): a `ureq` agent that follows the system's proxy, proxy
   login and TLS.
+- `OriginAuth` and `OriginLogin`: Basic, Negotiate and NTLM answered to an origin server's `401`,
+  for the hosts a policy names, as the logon session (SSPI, the Kerberos ticket cache) or given
+  credentials. `client::OriginAgent` (feature `ureq`) runs requests through it, on one pooled
+  connection, with the body sent again for each leg.
+- SOCKS 4, 4a and 5 (with username and password) in `ProxyConnector`; the host is sent as a name
+  for the proxy to resolve.
+- `Resolver::child_environment` writes a SOCKS proxy as `ALL_PROXY` (`socks5h://`, `socks4a://`)
+  when it serves every scheme the other variables do not.
+- The `<subnet>` entry of a bypass list: a host that resolves to a link-local address or to one on
+  a network of a local interface.
+- WPAD from DHCP option 252 on Unix, from the lease NetworkManager or `dhclient` recorded, ahead of
+  the DNS names.

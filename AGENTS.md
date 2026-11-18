@@ -10,17 +10,17 @@ source at <https://github.com/Boriken-Dev/coqui-syshttp>.
 | `pac` | `boa_engine`, `gethostname` | `pac::PacScript`; PAC and WPAD on macOS and Unix | off |
 | `tls` | `rustls` (ring), `rustls-platform-verifier`, `x509-cert`, `sha2`, `serde_json`; Windows: `rustls-cng`, `windows-registry`; macOS: `security-framework` | the `tls` module, `https:` proxies, `https:` PAC locations | off |
 | `pkcs11` | `cryptoki`, and `tls` | `tls::Pkcs11Source` | off |
-| `negotiate` | Unix: `libgssapi` (needs the system GSSAPI library and libclang to build) | Negotiate and NTLM proxy login; Windows uses SSPI with no extra crate | off |
+| `negotiate` | Unix: `libgssapi` (needs the system GSSAPI library and libclang to build) | Negotiate and NTLM login to a proxy or an origin server; Windows uses SSPI with no extra crate | off |
 | `ureq` | `ureq` 3, and `tls` | the `client` module | off |
 
 MSRV Rust 1.89, edition 2024. A default build depends on `http`, `percent-encoding`, `base64`,
-`thiserror`, `tracing`, `coqui-net-acl` and, on Windows, `windows-sys`. `coqui-net-acl` is a git
+`thiserror`, `tracing`, `if-addrs`, `coqui-net-acl` and, on Windows, `windows-sys`. `coqui-net-acl` is a git
 dependency pinned by revision.
 
 Root re-exports: `Resolver`, `ResolverBuilder`, `ChildEnvironment`, `ProxySetting`, `OnMissingEngine`, `Route`,
 `Proxy`, `ProxyBuilder`, `ProxyScheme`, `Credentials`, `Secret`, `BypassRules`, `Dialect`,
 `Environment`, `ProxyVariables`, `ProxyConnector`, `ProxyConnectorBuilder`, `Connection`,
-`Negotiate`, `NegotiateBuilder`, `Error`, `Reason`. Public modules: `auth`, `system`, and, behind
+`Negotiate`, `NegotiateBuilder`, `OriginAuth`, `OriginAuthBuilder`, `OriginLogin`, `Error`, `Reason`. Public modules: `auth`, `system`, and, behind
 their features, `pac`, `tls`, `client`.
 
 `unsafe` is confined to `src/system/winhttp.rs` (WinHTTP) and `src/auth/sspi.rs` (SSPI), both
@@ -103,6 +103,7 @@ impl ChildEnvironment {   // Clone, Eq; Debug masks credentials
     pub fn http_proxy(&self) -> Option<&Proxy>;  pub fn https_proxy(&self) -> Option<&Proxy>;
     pub fn no_proxy(&self) -> &[String];
     pub fn per_endpoint(&self) -> bool;
+    pub fn socks_proxy(&self) -> Option<&Proxy>;
     pub fn unexpressed(&self) -> &[String];
 }
 ```
@@ -110,9 +111,11 @@ impl ChildEnvironment {   // Clone, Eq; Debug masks credentials
 The variables a program you start needs, from what the resolver decides. A proxy that one setting
 names for every host (`proxy(...)`, the proxy variables, the system's manual proxies) becomes
 `HTTP_PROXY` or `HTTPS_PROXY`, with its credentials percent-encoded in the URL; the bypass list and
-loopback (`localhost,127.0.0.1,::1`, unless `<-loopback>`) become `NO_PROXY`. `pairs()` also gives the
-lowercase names where names are case-sensitive (some programs read only `http_proxy`), and is empty
-when everything goes direct (`NO_PROXY` alone is never given).
+loopback (`localhost,127.0.0.1,::1`, unless `<-loopback>`) become `NO_PROXY`. A SOCKS proxy that
+serves every scheme without a proxy of its own is `ALL_PROXY` (`socks5h://` or `socks4a://`, so the
+proxy resolves the names; `socks_proxy()`). `pairs()` also gives the lowercase names where names are
+case-sensitive (some programs read only `http_proxy`), and is empty when everything goes direct
+(`NO_PROXY` alone is never given).
 
 A proxy chosen per URL (a PAC script, WPAD, a KDE list naming the hosts that use the proxy)
 cannot be one variable, so it is asked about `endpoints`, the URLs the child will use:
@@ -122,10 +125,11 @@ listed in `unexpressed()`. With no endpoints a per-URL proxy sets nothing. Every
 checked against a proxy that every host uses, so an endpoint covered by a bypass rule `NO_PROXY`
 cannot spell (`<local>`, a glob) is still added by host.
 
-Not expressible, and listed in `unexpressed()`: a bypass entry that is `<local>`, a glob, a network
-with a port, or unreadable; an exact host of the WinINet or macOS lists is written as a bare name,
-which `NO_PROXY` reads as the host and its subdomains (a widening); a SOCKS proxy is not written
-at all (programs differ on it), and `ws:`/`wss:` endpoints count as `http:`/`https:`. An endpoint
+Not expressible, and listed in `unexpressed()`: a bypass entry that is `<local>`, `<subnet>`, a glob, a
+network with a port, or unreadable; an exact host of the WinINet or macOS lists is written as a bare name,
+which `NO_PROXY` reads as the host and its subdomains (a widening); `<subnet>`; a SOCKS proxy when
+a scheme goes direct or through another proxy (`ALL_PROXY` would send it through SOCKS too); and
+`ws:`/`wss:` endpoints count as `http:`/`https:`. An endpoint
 that is not a URL with a scheme and host is `Error::Parse`. The resolver's `credentials` are in the
 URLs, so the child's environment holds a secret: set it on the child only.
 
@@ -181,8 +185,9 @@ Entries: a host (exact; in `NoProxy` and `Kde`, and for a leading `.` or `*.` in
 host and its subdomains), a `*`/`?` glob (case-blind), a CIDR (`10.0.0.0/8`, `169.254/16`,
 `2001:db8::/32`; IP-literal hosts only, no DNS), `host:port` (the URL's port, or its scheme's
 default), `<local>` (no dot), `<-loopback>`, and `*` as the whole list. A `*` among other entries
-is skipped by `NoProxy` (as curl does) and matches everything in the others. `<subnet>` is
-unsupported and skipped (listed by `skipped()`). `Environment::from_pairs` isolates a test or a
+is skipped by `NoProxy` (as curl does) and matches everything in the others. `<subnet>` is a host
+that resolves (through the system's resolver, so a lookup waits for DNS) to a link-local address or
+to one on a network a local interface is on. `Environment::from_pairs` isolates a test or a
 host from the process; the library never reads the environment except through `process()` and
 `SystemSettings::read` (`XDG_CONFIG_HOME`, `HOME`).
 
@@ -233,8 +238,12 @@ pub enum Connection { Tcp(TcpStream), Tls(..) }       // non_exhaustive; Read + 
 `CONNECT host:port` (a plain `http:` origin is tunnelled too, so a proxy that allows `CONNECT`
 only to 443 refuses it) with `Proxy-Authorization: Basic` from the proxy's credentials, then its
 extra headers, and returns the tunnel after a `200`. A `407` with no credentials configured, or
-that refuses them, is `Error::Login`; any other status is `Error::Refused`; SOCKS is
-`Error::Unsupported`. For a proxy with no credentials a `Negotiate` policy naming it answers a
+that refuses them, is `Error::Login`; any other status is `Error::Refused`. A SOCKS proxy
+(`Socks4`, `Socks5`) is spoken to directly: SOCKS 5 with no login or username/password (RFC 1929),
+the host always sent as a name for the proxy to resolve (a literal address as an address); SOCKS 4
+sends an IPv4 address as is and a name as SOCKS 4a, the proxy's user name as the user id, and
+cannot name an IPv6 address (`Error::Unsupported`). A refused login is `Error::Login`, any other
+refusal `Error::Refused`. SOCKS 5 GSSAPI login is not spoken. For a proxy with no credentials a `Negotiate` policy naming it answers a
 `407` offering `Negotiate` (preferred) or `NTLM` with a handshake on the same connection, at most
 `max_legs` requests, tokens at most `max_token` bytes, never over plain `http:` to a proxy that is
 not loopback unless the policy allows it. `connect_url` asks the resolver, tries each route in
@@ -266,7 +275,44 @@ domain, not the domain. Windows uses the `Negotiate` and `NTLM` SSPI packages wi
 name `HTTP/<proxy host>`; Unix uses GSSAPI with `HTTP@<proxy host>` over SPNEGO (NTLM needs the
 `gss-ntlmssp` mechanism, and explicit credentials need a Kerberos KDC). Without the `negotiate`
 feature a policy that names the proxy fails the login with `Error::Login`. Channel binding is not
-sent. Negotiate for an origin server (a `401`) is not implemented.
+sent. For an origin server see `OriginAuth`.
+
+### An origin server's `401`
+
+```rust
+impl OriginAuth {
+    pub fn builder() -> OriginAuthBuilder;             // names nobody
+    pub fn wants_host(&self, host: &str) -> bool;
+    pub fn login(&self, url: &str) -> Result<Option<OriginLogin>, Error>;   // None: no rule covers the host
+    pub fn plain_http(&self) -> bool;  pub fn max_legs(&self) -> usize;  pub fn max_token(&self) -> usize;
+    pub fn max_body(&self) -> usize;
+}
+impl OriginAuthBuilder {
+    pub fn basic<I, S>(self, hosts: I, Credentials) -> Self;        // hosts: names, "*.suffix", "*"
+    pub fn negotiate<I, S>(self, hosts: I) -> Self;                 // logon session / Kerberos cache
+    pub fn negotiate_as<I, S>(self, hosts: I, Credentials) -> Self; // DOMAIN\user or user@REALM
+    pub fn plain_http(self, bool) -> Self;  pub fn max_legs(self, usize) -> Self;
+    pub fn max_token(self, usize) -> Self;  pub fn max_body(self, usize) -> Self;
+    pub fn build(self) -> Result<OriginAuth, Error>;
+}
+impl OriginLogin {      // one request's login; sans-IO
+    pub fn answer(&mut self, www_authenticate: &[&str]) -> Result<Option<Answer>, Error>;  // after a 401
+    pub fn finish(&mut self, www_authenticate: &[&str]) -> Result<(), Error>;              // after a non-401
+}
+impl Answer { pub fn authorization(&self) -> &str;  pub fn probe(&self) -> bool; }
+pub const DEFAULT_MAX_BODY: usize = 1 << 20;
+```
+
+`answer` takes the `WWW-Authenticate` values of a `401` and returns the `Authorization` value to
+retry with; `Ok(None)` means nothing to retry with (no scheme a rule covers, or the credentials were
+refused) and the `401` is the answer. A host may have several rules: `Negotiate` (preferred) or
+`NTLM` is answered by a Negotiate rule, `Basic` by a Basic rule; a Negotiate rule that cannot start
+(no ticket, no mechanism) falls back to a Basic rule, else is the error. Windows uses SSPI with the
+service name `HTTP/<host>`; Unix GSSAPI with `HTTP@<host>`. A password is not sent over plain `http:`
+to a host that is not loopback unless `plain_http(true)` (`Error::Login`). `probe()` is true for the
+first message of an NTLM login: send that leg with no body (the real one goes with the last leg).
+`finish` reads the closing token of a mechanism that proves the server (Kerberos). NTLM
+authenticates the connection, so every leg has to use the same one.
 
 ## PAC (`coqui_syshttp::pac`, feature `pac`)
 
@@ -291,8 +337,13 @@ UTF-8, else Latin-1. Builtins: the Netscape set plus `dnsResolveEx`, `myIpAddres
 as wildcards, case-sensitively. `weekdayRange`, `dateRange` and `timeRange` answer as Chromium's PAC
 library does: `timeRange(9, 17)` runs to 17:59:59 and does not wrap; `dateRange(24, "DEC")` keeps
 both ends in the current month; an unknown day or month name is false. A result that is not a
-string is `DIRECT`. WPAD tries `http://wpad.<domain>/wpad.dat` for each parent domain of this
-host's name, stopping above a public suffix; DHCP option 252 is not read.
+string is `DIRECT`. WPAD tries the URL the DHCP server handed out (option 252) and then
+`http://wpad.<domain>/wpad.dat` for each parent domain of this host's name, stopping above a public
+suffix. Option 252 is read from the lease the system's DHCP client recorded, not from the network:
+NetworkManager's `nmcli -t -f DHCP4,DHCP6 device show` and the `dhclient` lease files under
+`/var/lib/dhcp`, `/var/lib/dhclient` and `/var/lib/NetworkManager` (an option named `wpad`,
+`option-252`, `private_252` and the like); macOS and other clients are not read. Windows asks WinHTTP,
+which does its own DHCP discovery.
 
 ## TLS (`coqui_syshttp::tls`, feature `tls`)
 
@@ -408,12 +459,31 @@ client runs. `https:` is spoken with the `Tls` (server verification, client cert
 the host), `http:` through a proxy is tunnelled with `CONNECT`. The agent uses `ureq`'s unversioned
 transport traits, which can change in a `ureq` minor release.
 
+```rust
+impl OriginAgent {
+    pub fn new(agent: ureq::Agent, auth: OriginAuth) -> Self;       // Clone
+    pub fn agent(&self) -> &ureq::Agent;
+    pub fn run(&self, request: http::Request<impl AsRef<[u8]>>) -> Result<http::Response<ureq::Body>, ureq::Error>;
+}
+```
+
+`OriginAgent` wraps any agent (the one `AgentBuilder` makes, or Canoa's) and answers an origin
+server's `401` as its `OriginAuth` says. `ureq` middleware cannot send a request twice, so the
+requests to a host with a rule run through `OriginAgent::run` itself, on the agent's pooled
+connection (NTLM needs the same one for every leg); the body is bytes held in memory and sent once
+per leg, except the first NTLM message (no body). A request to another host, or one with its own
+`Authorization` header, is sent as it is. A `401` from another host than the request's (after a
+redirect) is not answered, and no `Authorization` follows a redirect. The agent's
+`http_status_as_error` applies to the final reply; a per-request setting is replaced by it for a
+host with a rule. A failed login is an `ureq::Error::Io` of kind `PermissionDenied`. Requests made
+with `agent.get(..)` do not go through the policy: use `run`.
+
 ## Errors
 
 `Error` is `#[non_exhaustive]`, `std::error::Error`, and never quotes its input. Variants: `Parse`
 (a proxy, URL or setting that cannot be read), `Pac`, `MissingEngine`, `Settings`, `NoReachableProxy`,
 `Refused` (a proxy refused a `CONNECT`), `Login` (credentials refused, or a Negotiate step failed),
-`Unsupported` (SOCKS, or an `https:` proxy without `tls`), `Tls`, `Io`. `Reason` is the clause inside
+`Unsupported` (an `https:` proxy without `tls`, an IPv6 address in SOCKS 4), `Tls`, `Io`. `Reason` is the clause inside
 (`Display` only).
 
 ## Environment variables

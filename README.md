@@ -18,14 +18,17 @@ explicit. Full API reference: <https://docs.rs/coqui-syshttp>.
   decide when any is set, else the operating system does; `NO_PROXY` and the system's own bypass
   list go direct first.
 - **Child processes**: `Resolver::child_environment` writes the system's proxy as
-  `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` for a program you start, and says what those
-  variables cannot hold.
+  `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (for SOCKS) and `NO_PROXY` for a program you start, and
+  says what those variables cannot hold.
 - **PAC and WPAD**: WinHTTP does both on Windows; elsewhere the Boa JavaScript engine runs the
   script (feature `pac`) with the Netscape and Microsoft `*Ex` builtins, a time limit per call,
-  and DNS-based WPAD discovery.
+  and WPAD discovery from DHCP option 252 (the lease the system's client recorded) and DNS.
 - **Proxy login**: Basic from credentials, extra headers sent to the proxy only, and
   Negotiate and NTLM through SSPI on Windows or GSSAPI elsewhere (feature `negotiate`) for the
-  proxies a policy names.
+  proxies a policy names. SOCKS 4, 4a and 5 (with username and password) are spoken too.
+- **Origin login**: `OriginAuth` answers a server's `401` with Basic, Negotiate (Kerberos) or NTLM,
+  as the logon session or given credentials, for the hosts a policy names; `client::OriginAgent`
+  does it for `ureq`.
 - **System TLS**: a `rustls` configuration verified by CryptoAPI, the Security framework or the
   system's roots (feature `tls`), or by roots you give.
 - **Keystore client certificates**: Windows CNG stores, the macOS Keychain and PKCS #11 modules
@@ -47,7 +50,7 @@ feature:
 | `pac` | `boa_engine`, `gethostname` | PAC scripts and WPAD on macOS and Unix; Windows needs it only for a script you load by hand |
 | `tls` | `rustls`, `rustls-platform-verifier`, `x509-cert`, `sha2`, `serde_json`; `rustls-cng` and `windows-registry` on Windows, `security-framework` on macOS | system TLS, keystore client certificates, `https:` proxies and `https:` PAC locations |
 | `pkcs11` | `cryptoki` (and `tls`) | client certificates on smart cards and tokens |
-| `negotiate` | `libgssapi` on Unix (the system's GSSAPI library and libclang to build) | Negotiate and NTLM proxy login |
+| `negotiate` | `libgssapi` on Unix (the system's GSSAPI library and libclang to build) | Negotiate and NTLM login to a proxy or an origin server |
 | `ureq` | `ureq` 3 (and `tls`) | an agent that follows the system |
 
 ## Quick start
@@ -113,12 +116,12 @@ let body = agent.get("https://example.com/").call()?.body_mut().read_to_string()
 
 | Module | Purpose |
 | --- | --- |
-| root | `Resolver`, `ChildEnvironment`, `Route`, `Proxy`, `Credentials`, `BypassRules`, `Environment`, `ProxyConnector`, `Connection`, `Negotiate`, `Error` |
+| root | `Resolver`, `ChildEnvironment`, `Route`, `Proxy`, `Credentials`, `BypassRules`, `Environment`, `ProxyConnector`, `Connection`, `Negotiate`, `OriginAuth`, `OriginLogin`, `Error` |
 | `system` | the operating system's proxy settings as data: `SystemSettings::read` |
-| `auth` | `basic_header`, the `Negotiate` policy and its limits |
+| `auth` | `basic_header`, the `Negotiate` policy for proxies, the `OriginAuth` policy for origin servers, their limits |
 | `pac` | `PacScript`: a PAC script evaluated in-process (feature `pac`) |
 | `tls` | `Tls`, `Trust`, `Selector`, `Identity`, keystore sources, auto-select rules (feature `tls`) |
-| `client` | `AgentBuilder`: a `ureq` agent that follows the system (feature `ureq`) |
+| `client` | `AgentBuilder`: a `ureq` agent that follows the system; `OriginAgent`: it answers an origin's `401` (feature `ureq`) |
 
 ## How a URL's proxy is decided
 
@@ -144,9 +147,10 @@ let body = agent.get("https://example.com/").call()?.body_mut().read_to_string()
 | Client certificates | CNG store | Keychain | PKCS #11 |
 | Server verification | CryptoAPI | Security framework | the system's roots |
 
-Not done: SOCKS proxies (reported as unsupported), `<subnet>` in a WinINet bypass list, DHCP
-option 252 for WPAD, Negotiate for the origin server itself, and the Chrome and Edge policy on
-macOS.
+Not done: SOCKS 5 GSSAPI login, DHCP option 252 on macOS (Windows asks WinHTTP), and the Chrome and
+Edge policy on macOS. A Kerberos exchange with a domain controller has not been run against a real
+domain; the Windows tests complete Negotiate and NTLM against the security package on the same
+machine, and the Unix GSSAPI path is exercised only as far as a ticket cache allows.
 
 ## Development
 
