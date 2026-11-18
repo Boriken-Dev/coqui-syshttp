@@ -1,7 +1,7 @@
 //! Logging in to an origin server: Basic, Negotiate and NTLM, answered to a `401`.
 //!
 //! This is the sans-IO half: [`OriginLogin`] is told the `WWW-Authenticate` values of a `401` and
-//! says what `Authorization` to retry with. [`client::OriginAgent`](crate::client::OriginAgent)
+//! says what `Authorization` to retry with. `client::OriginAgent` (feature `ureq`)
 //! drives it for `ureq`.
 
 use alloc::boxed::Box;
