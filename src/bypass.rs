@@ -42,6 +42,7 @@ impl Dialect {
 enum Rule {
     Everything,
     Local,
+    Subnet,
     Exact(String, Option<u16>),
     Suffix(String, Option<u16>),
     Glob(String, Option<u16>),
@@ -56,6 +57,7 @@ impl Rule {
         match self {
             Self::Everything => true,
             Self::Local => !host.contains('.') && target.address().is_none(),
+            Self::Subnet => on_local_network(target),
             Self::Exact(name, port) => host == name && port_ok(port),
             Self::Suffix(domain, port) => {
                 (host == domain
@@ -84,11 +86,13 @@ impl Rule {
 ///   matched against IP-literal hosts only: no name is resolved;
 /// - an optional `:port` after a host, compared with the URL's port (its scheme's default
 ///   when it has none);
-/// - `<local>`: a name with no dot; `<-loopback>`: turns the implicit loopback bypass off;
-///   `*` as the whole list: every host.
+/// - `<local>`: a name with no dot;
+/// - `<subnet>`: a host that resolves to a link-local address or to one on a network a local
+///   interface is on (the name is resolved by the system's resolver, so a lookup waits for DNS);
+/// - `<-loopback>`: turns the implicit loopback bypass off; `*` as the whole list: every host.
 ///
 /// `localhost`, `*.localhost`, `127.0.0.0/8` and `::1` always bypass unless `<-loopback>` is
-/// listed. The WinINet `<subnet>` token is not supported and is skipped.
+/// listed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BypassRules {
     rules: Vec<Rule>,
@@ -208,7 +212,7 @@ impl BypassRules {
         for (rule, text) in self.rules.iter().zip(listed) {
             let entry = match rule {
                 Rule::Everything => Some("*".to_string()),
-                Rule::Local | Rule::Glob(..) => None,
+                Rule::Local | Rule::Subnet | Rule::Glob(..) => None,
                 Rule::Exact(host, port) | Rule::Suffix(host, port) => Some(with_port(host, *port)),
                 Rule::Network(network, None) => Some(network.to_string()),
                 Rule::Network(_, Some(_)) => None,
@@ -246,6 +250,59 @@ fn with_port(host: &str, port: Option<u16>) -> String {
     }
 }
 
+/// Whether the host resolves to a link-local address or to one on a network of a local interface.
+fn on_local_network(target: &Target) -> bool {
+    use std::net::ToSocketAddrs as _;
+    let addresses: Vec<IpAddr> = match target.address() {
+        Some(address) => alloc::vec![address],
+        None => (target.host.as_str(), 0)
+            .to_socket_addrs()
+            .map(|found| found.map(|socket| socket.ip()).collect())
+            .unwrap_or_default(),
+    };
+    if addresses.iter().any(link_local) {
+        return true;
+    }
+    let Ok(interfaces) = if_addrs::get_if_addrs() else {
+        return false;
+    };
+    interfaces.iter().any(|interface| {
+        let (own, prefix) = match &interface.addr {
+            if_addrs::IfAddr::V4(v4) => (IpAddr::V4(v4.ip), v4.prefixlen),
+            if_addrs::IfAddr::V6(v6) => (IpAddr::V6(v6.ip), v6.prefixlen),
+        };
+        addresses
+            .iter()
+            .any(|address| same_network(*address, own, prefix))
+    })
+}
+
+fn link_local(address: &IpAddr) -> bool {
+    match address {
+        IpAddr::V4(v4) => v4.is_link_local(),
+        IpAddr::V6(v6) => v6.is_unicast_link_local(),
+    }
+}
+
+/// Whether `a` and `b` share their first `prefix` bits (and are the same family).
+fn same_network(a: IpAddr, b: IpAddr, prefix: u8) -> bool {
+    match (a, b) {
+        (IpAddr::V4(a), IpAddr::V4(b)) => {
+            let mask = u32::MAX
+                .checked_shl(32 - u32::from(prefix.min(32)))
+                .unwrap_or(0);
+            u32::from(a) & mask == u32::from(b) & mask
+        }
+        (IpAddr::V6(a), IpAddr::V6(b)) => {
+            let mask = u128::MAX
+                .checked_shl(128 - u32::from(prefix.min(128)))
+                .unwrap_or(0);
+            u128::from(a) & mask == u128::from(b) & mask
+        }
+        _ => false,
+    }
+}
+
 fn is_loopback(target: &Target) -> bool {
     let host = target.host.as_str();
     host == "localhost"
@@ -263,7 +320,7 @@ fn parse_entry(entry: &str, dialect: Dialect) -> Option<Rule> {
     match token.as_str() {
         "*" => return Some(Rule::Everything),
         "<local>" => return Some(Rule::Local),
-        "<subnet>" => return None,
+        "<subnet>" => return Some(Rule::Subnet),
         _ => {}
     }
     // WinINet and KDE lists sometimes carry `http://host`.
@@ -419,6 +476,36 @@ mod tests {
         let list = no_proxy("*.CORP.example, [bad");
         assert!(list.matches("http://a.corp.example/"));
         assert_eq!(list.skipped().collect::<Vec<_>>(), ["[bad"]);
+    }
+
+    #[test]
+    fn subnet_matches_an_address_on_a_local_network_or_link_local() {
+        let list = BypassRules::parse("<subnet>", Dialect::WinInet);
+        assert_eq!(list.skipped().count(), 0);
+        assert!(list.matches("http://169.254.7.7/"));
+        assert!(list.matches("http://[fe80::1]/"));
+        assert!(!list.matches("http://192.0.2.1/"));
+        // Whatever network this machine is on, its own address is on it.
+        let own = if_addrs::get_if_addrs()
+            .unwrap()
+            .into_iter()
+            .find(|interface| !interface.is_loopback() && interface.ip().is_ipv4())
+            .map(|interface| interface.ip());
+        if let Some(own) = own {
+            assert!(list.matches(&alloc::format!("http://{own}/")));
+        }
+    }
+
+    #[test]
+    fn a_prefix_decides_which_addresses_share_a_network() {
+        let a: IpAddr = "10.1.2.3".parse().unwrap();
+        assert!(same_network(a, "10.1.200.9".parse().unwrap(), 16));
+        assert!(!same_network(a, "10.2.2.3".parse().unwrap(), 16));
+        assert!(same_network(a, "99.9.9.9".parse().unwrap(), 0));
+        assert!(!same_network(a, "10.1.2.4".parse().unwrap(), 32));
+        assert!(!same_network(a, "::1".parse().unwrap(), 8));
+        let v6: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(same_network(v6, "2001:db8::ffff".parse().unwrap(), 64));
     }
 
     #[test]
