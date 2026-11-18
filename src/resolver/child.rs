@@ -14,11 +14,13 @@ use crate::system::SettingsState;
 ///
 /// `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` name one proxy for every host of a scheme, so a
 /// proxy chosen per URL (a PAC script, WPAD) cannot be written in full. See
-/// [`Resolver::child_environment`] for how the endpoints a caller names fill the gap.
+/// [`Resolver::child_environment`] for how the endpoints a caller names fill the gap. A SOCKS
+/// proxy is written as `ALL_PROXY`, which curl and the programs built on it read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildEnvironment {
     http: Option<Proxy>,
     https: Option<Proxy>,
+    socks: Option<Proxy>,
     no_proxy: Vec<String>,
     per_endpoint: bool,
     unexpressed: Vec<String>,
@@ -26,7 +28,9 @@ pub struct ChildEnvironment {
 
 impl ChildEnvironment {
     /// The variables to set, as `(name, value)`: `HTTP_PROXY` and `HTTPS_PROXY` for the proxies
-    /// the resolver chose, with their credentials in the URL, and `NO_PROXY` when a proxy is set.
+    /// the resolver chose, with their credentials in the URL, `ALL_PROXY` for a SOCKS proxy that
+    /// serves every scheme the others do not (`socks5h:` and `socks4a:`, so the proxy resolves
+    /// the names), and `NO_PROXY` when a proxy is set.
     /// Where names are case-sensitive each is given in upper and lower case, because some
     /// programs read only the lowercase `http_proxy`. Nothing when everything goes direct.
     pub fn pairs(&self) -> Vec<(String, String)> {
@@ -36,6 +40,9 @@ impl ChildEnvironment {
         }
         if let Some(proxy) = &self.https {
             pairs.push(("HTTPS_PROXY".to_string(), proxy.url_with_credentials()));
+        }
+        if let Some(proxy) = &self.socks {
+            pairs.push(("ALL_PROXY".to_string(), socks_url(proxy)));
         }
         if !pairs.is_empty() && !self.no_proxy.is_empty() {
             pairs.push(("NO_PROXY".to_string(), self.no_proxy.join(",")));
@@ -61,6 +68,11 @@ impl ChildEnvironment {
         self.https.as_ref()
     }
 
+    /// The SOCKS proxy written as `ALL_PROXY`, when there is one.
+    pub fn socks_proxy(&self) -> Option<&Proxy> {
+        self.socks.as_ref()
+    }
+
     /// The `NO_PROXY` entries, loopback and the hosts that were resolved direct included.
     pub fn no_proxy(&self) -> &[String] {
         &self.no_proxy
@@ -75,7 +87,8 @@ impl ChildEnvironment {
 
     /// What the variables cannot say, one text each: a bypass entry `NO_PROXY` has no form for
     /// (`<local>`, a glob, a network with a port), or an endpoint that goes through another
-    /// proxy than the one set for its scheme, or through SOCKS.
+    /// proxy than the one set for its scheme, or through a SOCKS proxy that `ALL_PROXY` cannot
+    /// serve (the other scheme goes direct, or through another proxy).
     pub fn unexpressed(&self) -> &[String] {
         &self.unexpressed
     }
@@ -85,8 +98,8 @@ impl ChildEnvironment {
 enum Wanted {
     Direct,
     Proxy(Proxy),
-    /// Nothing but SOCKS, which the variables are not used for.
-    Unsupported,
+    /// Nothing but SOCKS.
+    Socks(Proxy),
 }
 
 fn wanted(routes: &[Route]) -> Wanted {
@@ -101,7 +114,25 @@ fn wanted(routes: &[Route]) -> Wanted {
             Route::Proxy(_) => {}
         }
     }
-    Wanted::Unsupported
+    routes
+        .iter()
+        .find_map(|route| match route {
+            Route::Proxy(proxy) => Some(Wanted::Socks(proxy.clone())),
+            Route::Direct => None,
+        })
+        .unwrap_or(Wanted::Direct)
+}
+
+/// A SOCKS proxy as `ALL_PROXY` writes it: the proxy resolves the names.
+fn socks_url(proxy: &Proxy) -> String {
+    let url = proxy.url_with_credentials();
+    let (scheme, rest) = url.split_once("://").unwrap_or(("socks5", &url));
+    let scheme = if scheme == "socks4" {
+        "socks4a"
+    } else {
+        "socks5h"
+    };
+    alloc::format!("{scheme}://{rest}")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -137,6 +168,7 @@ impl Class {
 struct Plan {
     http: Option<Proxy>,
     https: Option<Proxy>,
+    socks: Vec<(Class, Proxy)>,
     per_endpoint: bool,
     unexpressed: Vec<String>,
     bypass: Vec<BypassRules>,
@@ -154,14 +186,46 @@ impl Plan {
         match wanted(routes) {
             Wanted::Proxy(proxy) => *self.slot(class) = Some(proxy),
             Wanted::Direct => {}
-            Wanted::Unsupported => self.unexpressed.push(alloc::format!(
-                "{} proxies: only SOCKS",
-                if class == Class::Http {
-                    "http"
-                } else {
-                    "https"
-                }
-            )),
+            Wanted::Socks(proxy) => self.socks.push((class, proxy)),
+        }
+    }
+
+    /// The SOCKS proxy `ALL_PROXY` can carry: one every scheme without a proxy of its own goes
+    /// through. What cannot be said is listed.
+    fn settle_socks(&mut self) -> Option<Proxy> {
+        let (_, proxy) = self.socks.first()?.clone();
+        let names = |class: Class| {
+            if class == Class::Http {
+                "http"
+            } else {
+                "https"
+            }
+        };
+        let mut serves = true;
+        for class in [Class::Http, Class::Https] {
+            let by_socks = self.socks.iter().any(|(c, p)| *c == class && *p == proxy);
+            if self.slot(class).is_none() && !by_socks {
+                serves = false;
+                self.unexpressed.push(alloc::format!(
+                    "{} URLs go direct, not through SOCKS",
+                    names(class)
+                ));
+            }
+        }
+        for (class, other) in self.socks.clone() {
+            if other != proxy {
+                self.unexpressed.push(alloc::format!(
+                    "{} proxies: another SOCKS proxy than {proxy}",
+                    names(class)
+                ));
+            }
+        }
+        if serves {
+            Some(proxy)
+        } else {
+            self.unexpressed
+                .push(alloc::format!("SOCKS proxy {proxy}: it cannot be written"));
+            None
         }
     }
 }
@@ -213,8 +277,19 @@ impl Resolver {
                     });
                     *plan.slot(class) = first;
                 }
+                let named = plan.socks.iter().any(|(c, _)| *c == class);
+                if plan.slot(class).is_none() && !named {
+                    let first = asked.iter().find_map(|(_, _, c, wanted)| match wanted {
+                        Wanted::Socks(proxy) if *c == class => Some(proxy.clone()),
+                        _ => None,
+                    });
+                    if let Some(proxy) = first {
+                        plan.socks.push((class, proxy));
+                    }
+                }
             }
         }
+        let socks = plan.settle_socks();
 
         // Pass 3: the bypass list, then what the endpoints need beyond it.
         let mut no_proxy = Vec::new();
@@ -228,7 +303,7 @@ impl Resolver {
             plan.unexpressed.extend(list.unexpressed);
         }
         for (url, target, class, wanted) in asked {
-            let set = plan.slot(class).clone();
+            let set = plan.slot(class).clone().or_else(|| socks.clone());
             match wanted {
                 Wanted::Direct => {
                     let covered = BypassRules::from_entries(
@@ -240,13 +315,14 @@ impl Resolver {
                         no_proxy.push(target.host);
                     }
                 }
-                Wanted::Proxy(proxy) if set.as_ref() == Some(&proxy) => {}
-                Wanted::Proxy(_) | Wanted::Unsupported => plan.unexpressed.push(url),
+                Wanted::Proxy(proxy) | Wanted::Socks(proxy) if set.as_ref() == Some(&proxy) => {}
+                Wanted::Proxy(_) | Wanted::Socks(_) => plan.unexpressed.push(url),
             }
         }
         Ok(ChildEnvironment {
             http: plan.http,
             https: plan.https,
+            socks,
             no_proxy,
             per_endpoint: plan.per_endpoint,
             unexpressed: plan.unexpressed,

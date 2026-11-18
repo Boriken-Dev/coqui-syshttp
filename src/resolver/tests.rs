@@ -426,8 +426,38 @@ mod child_environment {
     }
 
     #[test]
-    fn socks_alone_is_not_written_and_is_said_so() {
+    fn a_socks_proxy_for_every_scheme_is_written_as_all_proxy_with_remote_names() {
         let environment = system(manual("socks=gate:1080"))
+            .build()
+            .child_environment(["https://a.example/"])
+            .unwrap();
+        assert!(environment.unexpressed().is_empty());
+        assert_eq!(environment.socks_proxy().unwrap().port(), 1080);
+        let pairs = environment.pairs();
+        assert!(pairs.contains(&("ALL_PROXY".to_string(), "socks4a://gate:1080".to_string())));
+        assert!(pairs.iter().any(|(name, _)| name == "NO_PROXY"));
+        assert!(environment.http_proxy().is_none());
+    }
+
+    #[test]
+    fn socks5_is_written_as_socks5h() {
+        let environment = isolated()
+            .environment(Environment::from_pairs([("ALL_PROXY", "SOCKS5 gate:1080")]))
+            .build()
+            .child_environment(["https://a.example/"])
+            .unwrap();
+        let pairs = environment.pairs();
+        let (_, value) = pairs.iter().find(|(name, _)| name == "ALL_PROXY").unwrap();
+        assert_eq!(value, "socks5h://gate:1080");
+    }
+
+    #[test]
+    fn a_socks_proxy_beside_a_direct_scheme_cannot_be_written_and_is_said_so() {
+        let environment = isolated()
+            .environment(Environment::from_pairs([(
+                "HTTPS_PROXY",
+                "SOCKS5 gate:1080",
+            )]))
             .build()
             .child_environment(["https://a.example/"])
             .unwrap();
