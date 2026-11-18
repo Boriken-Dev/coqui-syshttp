@@ -15,7 +15,7 @@ mod macos;
 #[cfg(any(all(unix, not(target_os = "macos")), test))]
 mod posix;
 #[cfg(any(unix, test))]
-mod process;
+pub(crate) mod process;
 #[cfg(windows)]
 #[expect(
     unsafe_code,

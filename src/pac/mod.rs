@@ -26,6 +26,7 @@ use crate::proxy::{Route, Target};
 use dns::{resolve, resolve_all};
 
 mod builtins;
+pub(crate) mod dhcp;
 mod dns;
 pub(crate) mod fetch;
 pub(crate) mod wpad;

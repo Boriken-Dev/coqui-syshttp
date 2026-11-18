@@ -1,8 +1,6 @@
-//! DNS + HTTP WPAD (web proxy auto-discovery): `http://wpad.<domain>/wpad.dat` for each parent
+//! WPAD (web proxy auto-discovery): the URL the DHCP server handed out (option 252, read from the
+//! lease the system's DHCP client recorded), then `http://wpad.<domain>/wpad.dat` for each parent
 //! domain of this host's name, most specific first.
-//!
-//! DHCP option 252 is not read: it needs the operating system's lease data, which has no
-//! portable source.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -69,8 +67,22 @@ pub(crate) fn host_fqdn() -> Option<String> {
     None
 }
 
-/// The first `wpad.dat` that downloads and loads, or `None`. A domain whose script fails is skipped.
+/// A script that downloads from `url` and loads.
+fn load(url: &str, timeout: Duration) -> Option<PacScript> {
+    let body = fetch::get(url, timeout).ok()?;
+    PacScript::builder(String::from_utf8_lossy(&body).into_owned())
+        .build()
+        .ok()
+}
+
+/// The first `wpad.dat` that downloads and loads, or `None`. A location whose script fails is
+/// skipped.
 pub(crate) fn discover(fqdn: Option<&str>, timeout: Duration) -> Option<PacScript> {
+    for url in super::dhcp::urls() {
+        if let Some(script) = load(&url, timeout) {
+            return Some(script);
+        }
+    }
     let fqdn = match fqdn {
         Some(name) => name.to_string(),
         None => host_fqdn()?,
@@ -80,11 +92,7 @@ pub(crate) fn discover(fqdn: Option<&str>, timeout: Duration) -> Option<PacScrip
         if resolve(&host, timeout).is_none() {
             continue;
         }
-        let Ok(body) = fetch::get(&alloc::format!("http://{host}/wpad.dat"), timeout) else {
-            continue;
-        };
-        let source = String::from_utf8_lossy(&body).into_owned();
-        if let Ok(script) = PacScript::builder(source).build() {
+        if let Some(script) = load(&alloc::format!("http://{host}/wpad.dat"), timeout) {
             return Some(script);
         }
     }
