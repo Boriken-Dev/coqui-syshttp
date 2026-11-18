@@ -32,7 +32,8 @@ pub enum Error {
     /// A proxy or a server refused the credentials, or a Negotiate or NTLM exchange failed.
     #[error("login failed: {0}")]
     Login(Reason),
-    /// Every proxy offered speaks a protocol this client cannot use (SOCKS, for one).
+    /// Every proxy offered speaks a protocol this client cannot use (an `https:` proxy without the
+    /// `tls` feature, or an IPv6 address through SOCKS 4).
     #[error("no usable proxy: {0}")]
     Unsupported(Reason),
     /// A TLS configuration, a keystore or a certificate could not be used.
