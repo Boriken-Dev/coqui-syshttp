@@ -109,7 +109,7 @@ pub(crate) fn urls() -> Vec<String> {
             }
         }
     }
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|file| core::cmp::Reverse(file.0));
     for (_, contents) in files {
         for url in from_dhclient(&contents) {
             if !urls.contains(&url) {
