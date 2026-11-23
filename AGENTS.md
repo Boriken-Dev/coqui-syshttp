@@ -21,6 +21,9 @@ own `AGENTS.md`:
 | `ureq` | `tls`, `ureq` 3.5, `rustls` | the `ureq` module and `agent()` | off |
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper`, `hyper-util`, `tokio`, `tokio-rustls`, `tower-service` | the `hyper` module: `client()` | off |
 | `reqwest` | `tls`, `reqwest` 0.13 (no TLS backend of its own, `socks`), `rustls`, `tracing` | the `reqwest` module: `client()` | off |
+| `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs`, `percent-encoding` | the `session` module | off |
+| `json` | `session`, `serde`, `serde_json` | `Response::json`, `FetchBuilder::json` | off |
+| `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` | off |
 
 MSRV Rust 1.89, edition 2024. `#![forbid(unsafe_code)]`; no process-wide state; prints nothing.
 
@@ -60,6 +63,8 @@ impl AgentBuilder {
     pub fn failover(self, failover: bool) -> Self;            // default true: next route on a connect failure
     pub fn bad_proxy_ttl(self, ttl: Duration) -> Self;        // default 300 s: a failed proxy is tried last
     pub fn adapter_settings(self, settings: AdapterSettings) -> Self;
+    pub fn read_wait(self, wait: Duration) -> Self;            // longest wait on a connection at each step, whatever ureq allows
+    pub fn shared_tls(self, tls: Arc<Tls>) -> Self;            // one Tls for several agents (instead of tls)
     pub fn non_defaults(&self) -> Vec<String>;
     pub fn build(self) -> Result<ureq::Agent, Error>;
 }
@@ -138,12 +143,108 @@ fails to connect fails the request: `failover` and `bad_proxy_ttl` are accepted 
 
 ## Errors
 
-`Error` wraps the two crates' errors; a message names what failed and never quotes input.
+`Error` wraps the two crates' errors; a message names what failed and never quotes input. The `session` module has its
+own `session::Error` (`Configuration { variable, reason }`, `Hook`, `Response`, `InvalidRequest`, `TooLarge`, `Redirect`,
+`Io`, `Timeout`, `Tls`, `Proxy`), with `is_connection_failure()` and `is_timeout()`.
+
+## Module `session` (feature `session`)
+
+A client with memory above `ureq`, a port of the Python library `syshttp` 0.1.0: the same settings,
+the same environment variable names (`SYSHTTP_*`, below) and the same file formats, so a Python and a
+Rust program in one environment share them. Secrets (`Secret`): token and cookie values, never in
+`Debug`, `Display`, an error or a log; a token with CR, LF or NUL is `Error::Configuration` naming the key.
+
+```rust
+// session::{Client, ClientBuilder, RequestBuilder, HookRequest}
+Client::builder() -> ClientBuilder
+ClientBuilder::{settings(SessionSettings), header(name, Option<value>), user_agent, timeout(connect, read),
+    deadline(Option<Duration>), env(HttpEnv), resolver, tls(Tls), proxy_tls(Arc<ClientConfig>), trust(Trust),
+    connector, adapter_settings, origin_auth(OriginAuth), transport(impl Transport), cookies(CookieStore),
+    tokens(TokenStore), cookie_hosts(groups), auth_provider(Arc<dyn AuthProvider>),
+    hook(Regex, Fn(&Client, &mut HookRequest) -> Result<Option<Response>, BoxError>), build() -> Result<Client, Error>}
+Client::{request(Method, url) -> RequestBuilder, follow(Method, url, &Response) -> RequestBuilder, settings(), transport(),
+    close(), cookies() -> Vec<Cookie>, token_for(&Url)}                 // Clone; clones share state
+RequestBuilder::{body(impl Into<Body>), header(name, Option<value>), stream(bool), redirects(bool),
+    timeout(connect, read), deadline(Option<Duration>), auth(Auth), send() -> Result<Response, Error>}
+session::fetch(url) -> FetchBuilder   // method, header, body, form, json (feature json), timeout, client, transport,
+                                      // client_options, reauth(Arc<dyn AuthProvider>), send(); the body is read whole
+Auth::{Basic(Credentials), Header(Secret)}      trait AuthProvider { fn ensure(&self, &Client, &Url) -> Result<(), BoxError> }
+Body::{Empty, Bytes, Text, Reader, Chunks}      Timeouts { connect, read }      Headers (case-blind, ordered)
+Response: status(), reason(), headers(), url(), impl Read, chunks(n), content(), text(), text_with(enc, TextErrors),
+    json::<T>() (json), buffered(limit), read_limited(what, limit), json_limited(what, limit), discard(limit),
+    error_for_status() -> Result<Response, StatusError>, is_redirect(), close()
+ResponseBuilder::{new(status), reason, headers, url, body, decode, max_reply_bytes, decode_chunk, build()}
+trait Transport { send(PreparedRequest, stream: bool) -> Result<Response, Error>; close() }
+PreparedRequest::prepare(method, url, headers, body, timeout) -> Result<PreparedRequest, Error>
+UreqTransport::{builder(), new()}  UreqTransportBuilder::{env, resolver, tls, trust, proxy_tls, connector, adapter_settings,
+    pool, tls_max_age, max_reply_bytes, decode_chunk, origin_auth, settings, not_applied, build}
+session::{peer_text(text, limit), split_userinfo(url), retry_after(&Headers, now)}
+```
+
+Behaviour: every request and redirect hop asks the resolver again (a pooled connection is keyed by its route);
+a URL-prefix gateway (`SYSHTTP_PROXY_TYPE=prefix[:/endpoint]`) is asked for `<gateway><path><URL>`, a plain-http
+gateway never an `https:` origin. `GET`/`HEAD`/`OPTIONS` follow redirects (`303` becomes `GET`); other methods are
+sent once more on `307`/`308` (`PROPFIND` also `301`-`303`) to the same origin, any other 3xx is `Error::Redirect`;
+crossing scheme, host or port drops `Authorization`, `Cookie` and `Proxy-Authorization` for that hop and later ones.
+A status in `RetrySettings::statuses` or a failed connection (not a timeout, not `NoReachableProxy`) is retried for a
+method in `RetrySettings::methods` with a body that can be sent twice: the first retry at once, then `backoff` doubled,
+never less than `Retry-After`, at most `backoff_max`; the deadline bounds the sum; a status that outlasts the
+retries is returned. `gzip` and `deflate` are decoded unless the caller set `Accept-Encoding`, in steps of
+`decode_chunk`; a body shorter than its `Content-Length` is an error; over `max_reply_bytes` is `Error::TooLarge`.
+
+`SessionSettings` (build from `Default`, every bound a field): `connect_timeout` 10 s, `read_timeout` 60 s (each wait,
+`None` unlimited), `deadline` none, `user_agent` `coqui-syshttp/<version>`, `headers` `Accept: */*`, `max_redirects` 30,
+`retry` {`count` 3, `backoff` 1 s, `backoff_max` 120 s, `statuses` 408 429 500 502 503 504, `methods` GET HEAD OPTIONS
+PUT DELETE TRACE PROPFIND}, `max_reply_bytes` 8 MiB, `decode_chunk` 256 KiB, `max_interim_replies` 8, `pool` {`max_idle` 8,
+`max_idle_per_route` 1, `reuse_window` 1 s, `idle_timeout` 15 s}, `cookies` {`store` `Memory`|`PerHost`|`Key`|`Jar`, `hosts`,
+`max_age` 400 d, `max_per_host` 180, `max_bytes` 4096}, `tokens.store` `None`|`PerHost`|`Key`|`Jar`, `tls_max_age` 60 s,
+`system_proxy_max_age` 60 s, `peer_text_limit` 120.
+
+Sub-modules: `session::env` (`HttpEnv::{process, builder, prefixes, name, find, get, family, environment,
+system_proxy_enabled, proxy_auth_header, proxy_type, configured_proxy, check_proxy_settings, resolver(ProxyOverrides),
+resolver_with}` and the setting-name constants), `session::cookies` (`Cookie`, `CookieLike`, `HostAliases`,
+`parse_set_cookie`, `SetCookieContext`, `domain_covers`, `load_netscape`, `save_netscape`), `session::jar`
+(`CookieJar`, `TokenJar`, `MemoryCookieJar`, `MemoryTokenJar`, `FileCookieJar`, `FileTokenJar`, `store_root`,
+`default_root`, `safe_name`, `HOME`), `session::hooks` (`Hook`, `HookKind`, `from_env`, `matching`, `skipped`,
+`split_command`, `curl_command`, `wrapper_environment`, the `SYSHTTP_HOOK*` constants).
+
+Not ported from Python: import-time patching (`autopatch`), and the `_PY` / `SYSHTTP_DEFAULT_TRANSPORT` targets that
+name Python code (`ClientBuilder::hook` and `ClientBuilder::transport` replace them). A curl front end is not in this
+crate; `session::hooks` ports its data. `ureq` sends the standard methods only (a `PROPFIND` needs a transport of your
+own) and skips interim replies itself (`UreqTransportBuilder::not_applied()`). `Response::content()` is the Python
+`content` (`bytes` would collide with `std::io::Read::bytes`). With feature `session-reqwest`, `MemoryCookieJar` and
+`FileCookieJar` implement `reqwest::cookie::CookieStore` over the same files and `reqwest::builder_from(&SessionSettings)`
+maps what `reqwest` can honour; `reqwest` asks its `Proxy::custom` for every request it sends, each redirect hop included.
 
 ## Environment variables
 
-None read by this crate; coqui-proxy reads the proxy variables (`*_PROXY`, `ALL_PROXY`,
-`NO_PROXY`, `REQUEST_METHOD`, `XDG_CONFIG_HOME`, `HOME`).
+The `session` module reads these through `HttpEnv`, each name as `<PREFIX><NAME>` for every prefix of
+`SYSHTTP_PREFIX` (a `:`-separated list, taken literally and upper-cased; blank or unset is one empty
+prefix), the first one set winning. The `SYSHTTP_` names are Python syshttp's, kept unchanged so a
+Python and a Rust program share them. A malformed value is `Error::Configuration` naming the variable,
+never quoting the value. Without feature `session` this crate reads none; coqui-proxy reads the proxy
+variables (`*_PROXY`, `ALL_PROXY`, `NO_PROXY`, `REQUEST_METHOD`, `XDG_CONFIG_HOME`, `HOME`).
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `SYSHTTP_PREFIX` | prefixes of every other name (read as written, no prefix of its own) | none |
+| `SYSHTTP_PROXY` | a proxy for this crate's traffic, before the machine's | unset |
+| `SYSHTTP_PROXY_AUTH` | its credential, a header value sent verbatim | the URL's userinfo as Basic |
+| `SYSHTTP_PROXY_AUTH_HEADER` | the header that credential rides in | `Proxy-Authorization` |
+| `SYSHTTP_PROXY_TYPE` | `connect`, or `prefix[:/endpoint]` for a URL-prefix gateway | `connect` |
+| `SYSHTTP_SYSTEM_PROXY` | whether the system's proxy configuration is consulted (`1/true/yes/on`, `0/false/no/off`) | on |
+| `HTTP_PROXY_AUTH` | the machine proxy's `Proxy-Authorization` value | unset |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, `WS_PROXY`, `WSS_PROXY`, `ALL_PROXY`, `NO_PROXY` | the conventional ones (lower case first under each prefix); when any proxy variable is set they alone decide | unset |
+| `CA_BUNDLE` | a PEM file that replaces the system's trust for origins (`CURL_CA_BUNDLE` and `REQUESTS_CA_BUNDLE` are not read) | system trust |
+| `SYSHTTP_HOME` | the jar root: cookies under `cookies/<host>.txt`, tokens under `tokens/<host>.token` | `%LOCALAPPDATA%\syshttp`, `~/Library/Application Support/syshttp`, `$XDG_STATE_HOME/syshttp` or `~/.local/state/syshttp` |
+| `LOCALAPPDATA`, `XDG_STATE_HOME` | the platform's state directory, read unprefixed | platform |
+| `SYSHTTP_COOKIE_HOSTS` | hosts that share cookies: hosts split by `,`, groups by `;` | none |
+| `SYSHTTP_HOOKS_<KEY>` | a hook's URL pattern (a regular expression searched in the URL) | none |
+| `SYSHTTP_HOOKS_<KEY>_CURL` | the wrapper a curl front end runs for it | none |
+| `SYSHTTP_HOOK_SKIP` | KEYs not to run (comma list) | none |
+| `SYSHTTP_HOOK_URL`, `SYSHTTP_HOOK_KEY`, `SYSHTTP_HOOK_CURL` | given to a wrapper (`hooks::wrapper_environment`) | not read |
+
+`SYSHTTP_IMPORTPATCH`, `SYSHTTP_DEFAULT_TRANSPORT` and `SYSHTTP_HOOKS_<KEY>_PY` name Python code and are not read.
 
 ## Gotchas
 

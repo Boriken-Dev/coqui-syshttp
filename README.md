@@ -26,6 +26,9 @@ at the paths it has always had and adds the HTTP client that uses them. Full API
   (`hyper::client()`) and `reqwest` (`reqwest::client()`), with the same failover settings.
 - **Origin login**: `ureq::OriginAgent` answers a server's `401` with Basic, Negotiate or NTLM
   for the hosts a policy names.
+- **Sessions**: `session::Client` owns redirects, cookies, tokens, hooks, retries and a deadline above
+  `ureq`, with every setting read through `SYSHTTP_*` environment variables, the same names and
+  file formats as the Python library `syshttp` (feature `session`).
 - **One error type**: `Error` wraps the proxy and TLS crates' errors.
 
 ## Installation
@@ -46,6 +49,9 @@ feature:
 | `ureq` | `tls`, `ureq` 3 | the `ureq` module and `agent()` |
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper-util`, `tokio-rustls` | the `hyper` module and `hyper::client()` |
 | `reqwest` | `tls`, `reqwest` 0.13 | the `reqwest` module and `reqwest::client()` |
+| `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs` | the `session` module |
+| `json` | `session`, `serde_json` | JSON bodies and replies of the session layer |
+| `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` |
 
 ## Quick start
 
@@ -76,6 +82,44 @@ let body = agent.get("https://example.com/").call()?.body_mut().read_to_string()
 # }
 ```
 
+## Sessions
+
+A `session::Client` is a client with memory: it follows redirects (dropping `Authorization`,
+`Cookie` and `Proxy-Authorization` when a hop changes scheme, host or port), keeps cookies by host
+in memory or in Netscape files, sends a token from a jar as `Authorization`, retries transient
+statuses and dropped connections for methods that are safe to send twice, and bounds a whole
+request with a deadline. Routing is asked again for every hop. Python syshttp's settings are read
+unchanged, under the prefixes of `SYSHTTP_PREFIX`:
+
+```rust,no_run
+# #[cfg(feature = "session")]
+# fn demo() -> Result<(), Box<dyn std::error::Error>> {
+use coqui_syshttp::session::{Client, CookieStore, fetch};
+use std::time::Duration;
+
+let client = Client::builder()
+    .cookies(CookieStore::PerHost) // files under SYSHTTP_HOME, one per host
+    .deadline(Some(Duration::from_secs(30)))
+    .build()?;
+let mut reply = client.request("GET".parse()?, "https://example.com/").send()?;
+let text = reply.text()?;
+# let _ = text;
+
+// One request through a client made for the call:
+let reply = fetch("https://example.com/").send()?;
+assert!(reply.status() < 600);
+# Ok(())
+# }
+```
+
+Every bound is a setting of `session::SessionSettings` with Python syshttp's default (timeouts of
+10 s and 60 s, 30 redirects, 3 retries, an 8 MiB reply limit, ...). Token and cookie values are
+`Secret`s: they appear in no `Debug` output, error or log. Hooks are code given to
+`ClientBuilder::hook`, or data (`session::hooks`) for a front end that runs a wrapper; there is no
+import-time patching and no `module:attr` loading, because Rust code is linked, not imported by
+name. `ureq` sends the standard methods only, so a `PROPFIND` needs a transport of your own.
+`Response::content()` is the body whole (`bytes` would collide with `std::io::Read::bytes`).
+
 ## API overview
 
 | Item | Purpose |
@@ -86,7 +130,8 @@ let body = agent.get("https://example.com/").call()?.body_mut().read_to_string()
 | `tls` | the whole coqui-sslcontext crate (feature `tls`) |
 | `ureq` | `AgentBuilder`, `OriginAgent` (feature `ureq`) |
 | `hyper` | `client()`, `Builder`, `HttpsConnector` (feature `hyper`) |
-| `reqwest` | `client()`, `Builder` (feature `reqwest`) |
+| `reqwest` | `client()`, `Builder`, `builder_from` (feature `reqwest`, the last with `session-reqwest`) |
+| `session` | `Client`, `fetch`, `HttpEnv`, `SessionSettings`, `cookies`, `jar`, `hooks` (feature `session`) |
 
 How a URL's proxy is decided, the platform table and every setting are documented in
 [coqui-proxy](https://github.com/Boriken-Dev/coqui-proxy).
