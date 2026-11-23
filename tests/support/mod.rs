@@ -262,5 +262,6 @@ pub fn get(stream: &mut (impl Read + Write), host: &str) -> String {
 pub mod login_origin;
 #[cfg(feature = "tls")]
 pub mod pki;
+pub mod socks_server;
 #[cfg(feature = "tls")]
 pub mod tls_server;

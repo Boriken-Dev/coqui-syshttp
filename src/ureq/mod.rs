@@ -21,6 +21,7 @@ use ureq::unversioned::transport::{
     Buffers, ConnectionDetails, Connector, LazyBuffers, NextTimeout, Transport,
 };
 
+use crate::AdapterSettings;
 use coqui_proxy::auth::{Answer, OriginAuth};
 use coqui_proxy::{Connection, Error, ProxyConnector, Resolver};
 use coqui_sslcontext::Tls;
@@ -33,6 +34,7 @@ pub struct AgentBuilder {
     tls: Option<Tls>,
     connector: Option<ProxyConnector>,
     config: Option<Config>,
+    adapter: AdapterSettings,
 }
 
 impl Default for AgentBuilder {
@@ -50,7 +52,33 @@ impl AgentBuilder {
             tls: None,
             connector: None,
             config: None,
+            adapter: AdapterSettings::default(),
         }
+    }
+
+    /// Try the next route when connecting through one fails (default true). Only the connection is
+    /// retried: once a request is sent, a failure is the caller's.
+    pub fn failover(mut self, failover: bool) -> Self {
+        self.adapter.failover = failover;
+        self
+    }
+
+    /// How long a proxy that failed to connect is tried after the others (default 300 s).
+    pub fn bad_proxy_ttl(mut self, ttl: Duration) -> Self {
+        self.adapter.bad_proxy_ttl = ttl;
+        self
+    }
+
+    /// Both settings of [`AgentBuilder::failover`] and [`AgentBuilder::bad_proxy_ttl`] at once.
+    pub fn adapter_settings(mut self, settings: AdapterSettings) -> Self {
+        self.adapter = settings;
+        self
+    }
+
+    /// What this builder does that is looser than the defaults.
+    #[must_use]
+    pub fn non_defaults(&self) -> Vec<String> {
+        self.adapter.non_defaults()
     }
 
     /// Who decides the proxy (default: [`Resolver::system`]).
@@ -90,7 +118,10 @@ impl AgentBuilder {
         };
         let connector = SystemConnector {
             resolver: self.resolver.unwrap_or_else(Resolver::system),
-            connector: self.connector.unwrap_or_default(),
+            connector: self
+                .connector
+                .unwrap_or_default()
+                .with_failover(self.adapter.failover, self.adapter.bad_proxy_ttl),
             tls: Arc::new(tls),
         };
         Ok(ureq::Agent::with_parts(

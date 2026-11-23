@@ -11,10 +11,18 @@
 
 extern crate alloc;
 
+mod adapter;
 mod error;
+#[cfg(feature = "hyper")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hyper")))]
+pub mod hyper;
+#[cfg(feature = "reqwest")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reqwest")))]
+pub mod reqwest;
 #[cfg(feature = "ureq")]
 pub mod ureq;
 
+pub use adapter::AdapterSettings;
 pub use coqui_proxy as proxy;
 #[cfg(feature = "pac")]
 #[cfg_attr(docsrs, doc(cfg(feature = "pac")))]
