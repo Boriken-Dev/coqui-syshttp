@@ -201,6 +201,12 @@ impl HttpEnv {
         }
     }
 
+    /// The variable `name` as written, no prefix applied (for the platform's own, such as
+    /// `LOCALAPPDATA`).
+    pub(crate) fn raw(&self, name: &str) -> Option<String> {
+        self.variable(name)
+    }
+
     fn all(&self) -> BTreeMap<String, String> {
         match &self.variables {
             Variables::Map(map) => (**map).clone(),

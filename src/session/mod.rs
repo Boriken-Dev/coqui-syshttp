@@ -9,6 +9,13 @@ pub mod env;
 mod error;
 mod fileio;
 mod httpdate;
+pub mod jar;
+mod settings;
 
 pub use env::{HttpEnv, HttpEnvBuilder, ProxyOverrides};
 pub use error::{BoxError, Error};
+pub use jar::{CookieJar, TokenJar};
+pub use settings::{
+    CookieSettings, CookieStore, DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT, PoolSettings,
+    RetrySettings, SessionSettings, TokenSettings, TokenStore,
+};
