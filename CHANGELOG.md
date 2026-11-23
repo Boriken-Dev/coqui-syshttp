@@ -17,4 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `hyper` and `reqwest` modules (features of the same names): a `hyper-util` client and a `reqwest` client
+  that follow the system's proxy, proxy login and TLS; `AdapterSettings` (`failover`, `bad_proxy_ttl`) on the
+  three adapters' builders, `ureq::AgentBuilder::{failover, bad_proxy_ttl}`.
 - `agent()`: a `ureq` agent that follows the system, in one call.

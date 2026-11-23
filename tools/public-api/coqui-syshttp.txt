@@ -1,0 +1,137 @@
+pub mod coqui_syshttp
+pub use coqui_syshttp::BypassRules
+pub use coqui_syshttp::ChildEnvironment
+pub use coqui_syshttp::Connection
+pub use coqui_syshttp::Credentials
+pub use coqui_syshttp::Dialect
+pub use coqui_syshttp::Environment
+pub use coqui_syshttp::Negotiate
+pub use coqui_syshttp::NegotiateBuilder
+pub use coqui_syshttp::OnMissingEngine
+pub use coqui_syshttp::OriginAuth
+pub use coqui_syshttp::OriginAuthBuilder
+pub use coqui_syshttp::OriginLogin
+pub use coqui_syshttp::Proxy
+pub use coqui_syshttp::ProxyBuilder
+pub use coqui_syshttp::ProxyConnector
+pub use coqui_syshttp::ProxyConnectorBuilder
+pub use coqui_syshttp::ProxyScheme
+pub use coqui_syshttp::ProxySetting
+pub use coqui_syshttp::ProxyVariables
+pub use coqui_syshttp::Resolver
+pub use coqui_syshttp::ResolverBuilder
+pub use coqui_syshttp::Route
+pub use coqui_syshttp::Secret
+pub use coqui_syshttp::auth
+pub use coqui_syshttp::pac
+pub use coqui_syshttp::proxy
+pub use coqui_syshttp::system
+pub use coqui_syshttp::tls
+pub mod coqui_syshttp::hyper
+pub struct coqui_syshttp::hyper::Builder<B>
+impl<B> coqui_syshttp::hyper::Builder<B> where B: http_body::Body + core::marker::Send + 'static + core::marker::Unpin, <B as http_body::Body>::Data: core::marker::Send, <B as http_body::Body>::Error: core::convert::Into<alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>>
+pub fn coqui_syshttp::hyper::Builder<B>::build(self) -> core::result::Result<hyper_util::client::legacy::client::Client<coqui_syshttp::hyper::HttpsConnector, B>, coqui_syshttp::Error>
+impl<B> coqui_syshttp::hyper::Builder<B>
+pub fn coqui_syshttp::hyper::Builder<B>::adapter_settings(self, coqui_syshttp::AdapterSettings) -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::bad_proxy_ttl(self, core::time::Duration) -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::client(self, hyper_util::client::legacy::client::Client<coqui_syshttp::hyper::HttpsConnector, B>) -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::configure(self, impl core::ops::function::FnOnce(&mut hyper_util::client::legacy::client::Builder) + core::marker::Send + 'static) -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::connector(self, coqui_proxy::connect::ProxyConnector) -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::connector_service(&self) -> core::result::Result<coqui_syshttp::hyper::HttpsConnector, coqui_syshttp::Error>
+pub fn coqui_syshttp::hyper::Builder<B>::failover(self, bool) -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::new() -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_syshttp::hyper::Builder<B>::resolver(self, coqui_proxy::resolver::Resolver) -> Self
+pub fn coqui_syshttp::hyper::Builder<B>::tls(self, coqui_sslcontext::client::Tls) -> Self
+impl<B> core::default::Default for coqui_syshttp::hyper::Builder<B>
+pub fn coqui_syshttp::hyper::Builder<B>::default() -> Self
+impl<B> core::fmt::Debug for coqui_syshttp::hyper::Builder<B>
+pub fn coqui_syshttp::hyper::Builder<B>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct coqui_syshttp::hyper::HttpsConnector
+impl coqui_syshttp::hyper::HttpsConnector
+pub fn coqui_syshttp::hyper::HttpsConnector::new(coqui_proxy::connect::ProxyConnector, coqui_proxy::resolver::Resolver, impl core::convert::Into<alloc::sync::Arc<coqui_sslcontext::client::Tls>>) -> Self
+pub fn coqui_syshttp::hyper::HttpsConnector::resolver(&self) -> &coqui_proxy::resolver::Resolver
+impl core::fmt::Debug for coqui_syshttp::hyper::HttpsConnector
+pub fn coqui_syshttp::hyper::HttpsConnector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl tower_service::Service<http::uri::Uri> for coqui_syshttp::hyper::HttpsConnector
+pub type coqui_syshttp::hyper::HttpsConnector::Error = coqui_syshttp::Error
+pub type coqui_syshttp::hyper::HttpsConnector::Future = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<coqui_syshttp::hyper::Stream, coqui_syshttp::Error>> + core::marker::Send)>>
+pub type coqui_syshttp::hyper::HttpsConnector::Response = coqui_syshttp::hyper::Stream
+pub fn coqui_syshttp::hyper::HttpsConnector::call(&mut self, http::uri::Uri) -> Self::Future
+pub fn coqui_syshttp::hyper::HttpsConnector::poll_ready(&mut self, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::result::Result<(), coqui_syshttp::Error>>
+pub struct coqui_syshttp::hyper::Stream
+impl core::fmt::Debug for coqui_syshttp::hyper::Stream
+pub fn coqui_syshttp::hyper::Stream::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl hyper::rt::io::Read for coqui_syshttp::hyper::Stream
+pub fn coqui_syshttp::hyper::Stream::poll_read(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, hyper::rt::io::ReadBufCursor<'_>) -> core::task::poll::Poll<core::io::error::Result<()>>
+impl hyper::rt::io::Write for coqui_syshttp::hyper::Stream
+pub fn coqui_syshttp::hyper::Stream::poll_flush(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::io::error::Result<()>>
+pub fn coqui_syshttp::hyper::Stream::poll_shutdown(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::io::error::Result<()>>
+pub fn coqui_syshttp::hyper::Stream::poll_write(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>, &[u8]) -> core::task::poll::Poll<core::io::error::Result<usize>>
+impl hyper_util::client::legacy::connect::Connection for coqui_syshttp::hyper::Stream
+pub fn coqui_syshttp::hyper::Stream::connected(&self) -> hyper_util::client::legacy::connect::Connected
+pub fn coqui_syshttp::hyper::builder<B>() -> coqui_syshttp::hyper::Builder<B>
+pub fn coqui_syshttp::hyper::client<B>() -> core::result::Result<hyper_util::client::legacy::client::Client<coqui_syshttp::hyper::HttpsConnector, B>, coqui_syshttp::Error> where B: http_body::Body + core::marker::Send + 'static + core::marker::Unpin, <B as http_body::Body>::Data: core::marker::Send, <B as http_body::Body>::Error: core::convert::Into<alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>>
+pub mod coqui_syshttp::reqwest
+pub struct coqui_syshttp::reqwest::Builder
+impl coqui_syshttp::reqwest::Builder
+pub fn coqui_syshttp::reqwest::Builder::adapter_settings(self, coqui_syshttp::AdapterSettings) -> Self
+pub fn coqui_syshttp::reqwest::Builder::bad_proxy_ttl(self, core::time::Duration) -> Self
+pub fn coqui_syshttp::reqwest::Builder::build(self) -> core::result::Result<reqwest::async_impl::client::Client, coqui_syshttp::Error>
+pub fn coqui_syshttp::reqwest::Builder::client_builder(self) -> core::result::Result<reqwest::async_impl::client::ClientBuilder, coqui_syshttp::Error>
+pub fn coqui_syshttp::reqwest::Builder::configure(self, impl core::ops::function::FnOnce(reqwest::async_impl::client::ClientBuilder) -> reqwest::async_impl::client::ClientBuilder + core::marker::Send + 'static) -> Self
+pub fn coqui_syshttp::reqwest::Builder::connector(self, coqui_proxy::connect::ProxyConnector) -> Self
+pub fn coqui_syshttp::reqwest::Builder::failover(self, bool) -> Self
+pub fn coqui_syshttp::reqwest::Builder::new() -> Self
+pub fn coqui_syshttp::reqwest::Builder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_syshttp::reqwest::Builder::not_applied(&self) -> alloc::vec::Vec<&'static str>
+pub fn coqui_syshttp::reqwest::Builder::resolver(self, coqui_proxy::resolver::Resolver) -> Self
+pub fn coqui_syshttp::reqwest::Builder::tls_config(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
+impl core::default::Default for coqui_syshttp::reqwest::Builder
+pub fn coqui_syshttp::reqwest::Builder::default() -> Self
+impl core::fmt::Debug for coqui_syshttp::reqwest::Builder
+pub fn coqui_syshttp::reqwest::Builder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn coqui_syshttp::reqwest::builder() -> coqui_syshttp::reqwest::Builder
+pub fn coqui_syshttp::reqwest::client() -> core::result::Result<reqwest::async_impl::client::Client, coqui_syshttp::Error>
+pub mod coqui_syshttp::ureq
+pub struct coqui_syshttp::ureq::AgentBuilder
+impl coqui_syshttp::ureq::AgentBuilder
+pub fn coqui_syshttp::ureq::AgentBuilder::adapter_settings(self, coqui_syshttp::AdapterSettings) -> Self
+pub fn coqui_syshttp::ureq::AgentBuilder::bad_proxy_ttl(self, core::time::Duration) -> Self
+pub fn coqui_syshttp::ureq::AgentBuilder::build(self) -> core::result::Result<ureq::agent::Agent, coqui_syshttp::Error>
+pub fn coqui_syshttp::ureq::AgentBuilder::config(self, ureq::config::Config) -> Self
+pub fn coqui_syshttp::ureq::AgentBuilder::connector(self, coqui_proxy::connect::ProxyConnector) -> Self
+pub fn coqui_syshttp::ureq::AgentBuilder::failover(self, bool) -> Self
+pub fn coqui_syshttp::ureq::AgentBuilder::new() -> Self
+pub fn coqui_syshttp::ureq::AgentBuilder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_syshttp::ureq::AgentBuilder::resolver(self, coqui_proxy::resolver::Resolver) -> Self
+pub fn coqui_syshttp::ureq::AgentBuilder::tls(self, coqui_sslcontext::client::Tls) -> Self
+impl core::default::Default for coqui_syshttp::ureq::AgentBuilder
+pub fn coqui_syshttp::ureq::AgentBuilder::default() -> Self
+pub struct coqui_syshttp::ureq::OriginAgent
+impl coqui_syshttp::ureq::OriginAgent
+pub fn coqui_syshttp::ureq::OriginAgent::agent(&self) -> &ureq::agent::Agent
+pub fn coqui_syshttp::ureq::OriginAgent::new(ureq::agent::Agent, coqui_proxy::auth::origin::OriginAuth) -> Self
+pub fn coqui_syshttp::ureq::OriginAgent::run(&self, http::request::Request<impl core::convert::AsRef<[u8]>>) -> core::result::Result<http::response::Response<ureq::body::Body>, ureq::error::Error>
+#[non_exhaustive] pub enum coqui_syshttp::Error
+pub coqui_syshttp::Error::Http(coqui_syshttp::Reason)
+pub coqui_syshttp::Error::Proxy(coqui_proxy::error::Error)
+pub coqui_syshttp::Error::Tls(coqui_sslcontext::error::Error)
+impl core::convert::From<core::io::error::Error> for coqui_syshttp::Error
+pub fn coqui_syshttp::Error::from(core::io::error::Error) -> Self
+#[non_exhaustive] pub struct coqui_syshttp::AdapterSettings
+pub coqui_syshttp::AdapterSettings::bad_proxy_ttl: core::time::Duration
+pub coqui_syshttp::AdapterSettings::failover: bool
+impl coqui_syshttp::AdapterSettings
+pub const coqui_syshttp::AdapterSettings::DEFAULT_BAD_PROXY_TTL: core::time::Duration
+pub const coqui_syshttp::AdapterSettings::DEFAULT_FAILOVER: bool
+impl coqui_syshttp::AdapterSettings
+pub fn coqui_syshttp::AdapterSettings::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+impl core::default::Default for coqui_syshttp::AdapterSettings
+pub fn coqui_syshttp::AdapterSettings::default() -> Self
+pub struct coqui_syshttp::Reason(_)
+impl coqui_syshttp::Reason
+pub fn coqui_syshttp::Reason::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::fmt::Display for coqui_syshttp::Reason
+pub fn coqui_syshttp::Reason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn coqui_syshttp::agent() -> core::result::Result<ureq::agent::Agent, coqui_syshttp::Error>

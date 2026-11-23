@@ -22,6 +22,8 @@ at the paths it has always had and adds the HTTP client that uses them. Full API
 - **Everything of the two crates, at the same paths**: `Resolver`, `Route`, `Proxy`,
   `ProxyConnector`, `OriginAuth`, ... from coqui-proxy at the root, `auth`, `system` and `pac`
   as modules, and coqui-sslcontext as `tls`.
+- **Three HTTP stacks**: the same system proxy, proxy login and TLS for `ureq` (blocking), `hyper-util`
+  (`hyper::client()`) and `reqwest` (`reqwest::client()`), with the same failover settings.
 - **Origin login**: `ureq::OriginAgent` answers a server's `401` with Basic, Negotiate or NTLM
   for the hosts a policy names.
 - **One error type**: `Error` wraps the proxy and TLS crates' errors.
@@ -42,6 +44,8 @@ feature:
 | `tls` | `coqui-sslcontext` (with its `system` feature), `coqui-proxy/tls` | the `tls` module, `https:` proxies and PAC locations |
 | `pkcs11` | `tls`, `coqui-sslcontext/pkcs11` | client certificates on smart cards and tokens |
 | `ureq` | `tls`, `ureq` 3 | the `ureq` module and `agent()` |
+| `hyper` | `tls`, `coqui-proxy/hyper`, `hyper-util`, `tokio-rustls` | the `hyper` module and `hyper::client()` |
+| `reqwest` | `tls`, `reqwest` 0.13 | the `reqwest` module and `reqwest::client()` |
 
 ## Quick start
 
@@ -81,6 +85,8 @@ let body = agent.get("https://example.com/").call()?.body_mut().read_to_string()
 | `auth`, `system`, `pac` | coqui-proxy's modules (`pac` behind its feature) |
 | `tls` | the whole coqui-sslcontext crate (feature `tls`) |
 | `ureq` | `AgentBuilder`, `OriginAgent` (feature `ureq`) |
+| `hyper` | `client()`, `Builder`, `HttpsConnector` (feature `hyper`) |
+| `reqwest` | `client()`, `Builder` (feature `reqwest`) |
 
 How a URL's proxy is decided, the platform table and every setting are documented in
 [coqui-proxy](https://github.com/Boriken-Dev/coqui-proxy).
