@@ -218,6 +218,6 @@ impl Cookie {
         if self.secure && url.scheme() != "https" && !SECURE_HOSTS.contains(&host.as_str()) {
             return false;
         }
-        !self.expires.is_some_and(|expires| expires <= now)
+        self.expires.is_none_or(|expires| expires > now)
     }
 }
