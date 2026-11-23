@@ -285,7 +285,7 @@ impl UreqTransportBuilder {
             max_reply_bytes: self.max_reply_bytes,
             decode_chunk: self.decode_chunk,
             origin_auth: self.origin_auth,
-            agents: Mutex::new(None),
+            cache: Mutex::new(None),
         };
         // The verifier is started now, so a setting that cannot be used is refused now.
         inner.agent_for(Key::default())?;
@@ -320,7 +320,7 @@ struct Inner {
     max_reply_bytes: usize,
     decode_chunk: usize,
     origin_auth: Option<OriginAuth>,
-    agents: Mutex<Option<Agents>>,
+    cache: Mutex<Option<Agents>>,
 }
 
 impl Inner {
@@ -350,7 +350,7 @@ impl Inner {
 
     fn agent_for(&self, key: Key) -> Result<ureq::Agent, Error> {
         let mut guard = self
-            .agents
+            .cache
             .lock()
             .map_err(|_| Error::Io(io::Error::other("the transport is poisoned")))?;
         let stale = guard.as_ref().is_none_or(|agents| {
@@ -660,7 +660,7 @@ impl Transport for UreqTransport {
     }
 
     fn close(&self) {
-        if let Ok(mut guard) = self.inner.agents.lock() {
+        if let Ok(mut guard) = self.inner.cache.lock() {
             *guard = None;
         }
     }

@@ -1,4 +1,4 @@
-//! A client above [`ureq`](::ureq) that owns redirects, cookies, tokens, hooks, retries and a
+//! A client above [`ureq`] that owns redirects, cookies, tokens, hooks, retries and a
 //! deadline, with every setting read through prefixed environment variables.
 //!
 //! It is a port of the Python library `syshttp`: the same settings, the same environment variable
