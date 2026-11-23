@@ -14,8 +14,6 @@ CLAUDE*
 
 # Rust
 /target/
-# A library does not commit its lockfile.
-/Cargo.lock
 
 # OS/editor
 .DS_Store
