@@ -21,11 +21,9 @@ use ureq::unversioned::transport::{
     Buffers, ConnectionDetails, Connector, LazyBuffers, NextTimeout, Transport,
 };
 
-use crate::auth::OriginAuth;
-use crate::connect::{Connection, ProxyConnector};
-use crate::error::Error;
-use crate::resolver::Resolver;
-use crate::tls::Tls;
+use coqui_proxy::auth::{Answer, OriginAuth};
+use coqui_proxy::{Connection, Error, ProxyConnector, Resolver};
+use coqui_sslcontext::Tls;
 
 /// Builds a `ureq` agent that follows the system.
 #[derive(Debug)]
@@ -84,8 +82,8 @@ impl AgentBuilder {
     ///
     /// # Errors
     ///
-    /// [`Error::Tls`] when the operating system's verifier cannot start.
-    pub fn build(self) -> Result<ureq::Agent, Error> {
+    /// [`crate::Error::Tls`] when the operating system's verifier cannot start.
+    pub fn build(self) -> Result<ureq::Agent, crate::Error> {
         let tls = match self.tls {
             Some(tls) => tls,
             None => Tls::builder().build()?,
@@ -176,7 +174,10 @@ impl Connector<()> for SystemConnector {
                 buffers,
             }));
         }
-        let config = self.tls.client_config(&host).map_err(to_ureq)?;
+        let config = self
+            .tls
+            .client_config(&host)
+            .map_err(|error| ureq::Error::Io(io::Error::other(error.to_string())))?;
         let name = ServerName::try_from(host)
             .map_err(|_| ureq::Error::Tls("the host is not a valid server name"))?;
         let session = ClientConnection::new(config, name)
@@ -381,10 +382,10 @@ impl OriginAgent {
         };
         let host = parts.uri.host().map(str::to_ascii_lowercase);
         let status_as_error = self.agent.config().http_status_as_error();
-        let mut answer: Option<crate::auth::Answer> = None;
+        let mut answer: Option<Answer> = None;
         loop {
-            let authorization = answer.as_ref().map(crate::auth::Answer::authorization);
-            let probe = answer.as_ref().is_some_and(crate::auth::Answer::probe);
+            let authorization = answer.as_ref().map(Answer::authorization);
+            let probe = answer.as_ref().is_some_and(Answer::probe);
             let mut response =
                 self.send(&parts, authorization, if probe { &[] } else { body }, true)?;
             let values: Vec<String> = response

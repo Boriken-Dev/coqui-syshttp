@@ -7,9 +7,9 @@ mod support;
 
 use std::sync::Arc;
 
-use coqui_syshttp::client::AgentBuilder;
 use coqui_syshttp::system::{SettingsSource, SettingsState, SystemSettings};
 use coqui_syshttp::tls::{ClientCertificates, Identity, IdentitySource, Selector, Tls, Trust};
+use coqui_syshttp::ureq::AgentBuilder;
 use coqui_syshttp::{Credentials, Environment, Resolver};
 use support::pki::{Ca, Leaf};
 use support::tls_server::{ClientAuth, TlsServer};
@@ -88,7 +88,7 @@ fn world(source: impl FnOnce(&Leaf) -> Box<dyn IdentitySource>) -> World {
 struct Boxed(Box<dyn IdentitySource>);
 
 impl IdentitySource for Boxed {
-    fn identities(&self) -> Result<Vec<Identity>, coqui_syshttp::Error> {
+    fn identities(&self) -> Result<Vec<Identity>, coqui_syshttp::tls::Error> {
         self.0.identities()
     }
 }
@@ -135,31 +135,4 @@ fn a_host_the_pac_sends_direct_never_touches_the_proxy() {
         world.server.presented(),
         [Some(world.client.leaf_der().to_vec())]
     );
-}
-
-#[cfg(windows)]
-#[test]
-fn the_certificate_comes_from_a_windows_keystore() {
-    use support::cng_store::{KeyGuard, import};
-
-    let mut guard = None;
-    let world = world(|client| {
-        let store = import(client);
-        guard = Some(KeyGuard(Arc::clone(&store)));
-        Box::new(coqui_syshttp::tls::CngSource::from_store(
-            store,
-            "test store",
-        ))
-    });
-    let reply = body(&world.agent, "https://app.internal.test/");
-    assert_eq!(reply, "client certificate seen");
-    assert_eq!(
-        world.proxy.seen()[0].request_line,
-        "CONNECT app.internal.test:443 HTTP/1.1"
-    );
-    assert_eq!(
-        world.server.presented(),
-        [Some(world.client.leaf_der().to_vec())]
-    );
-    drop(guard);
 }

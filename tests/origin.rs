@@ -4,7 +4,7 @@
 
 mod support;
 
-use coqui_syshttp::client::{AgentBuilder, OriginAgent};
+use coqui_syshttp::ureq::{AgentBuilder, OriginAgent};
 use coqui_syshttp::{Credentials, Environment, OriginAuth, Resolver};
 use support::login_origin::{Demand, LoginOrigin};
 use ureq::http::{Request, header};
@@ -127,90 +127,17 @@ fn a_401_from_another_host_after_a_redirect_is_not_answered() {
     assert_eq!(log[0].authorization, None);
 }
 
-#[cfg(all(windows, feature = "negotiate"))]
-mod security {
-    use super::*;
-    use base64::Engine as _;
-    use base64::engine::general_purpose::STANDARD;
-
-    fn negotiate() -> OriginAuth {
-        OriginAuth::builder()
-            .negotiate(["127.0.0.1"])
-            .build()
-            .unwrap()
-    }
-
-    fn token_of(authorization: &str) -> Vec<u8> {
-        let (_, token) = authorization.split_once(' ').unwrap();
-        STANDARD.decode(token).unwrap()
-    }
-
-    #[test]
-    fn negotiate_logs_in_with_the_logon_session_on_one_connection() {
-        let origin = LoginOrigin::start(Demand::Security("Negotiate"));
-        let client = OriginAgent::new(agent(true), negotiate());
-        let response = client
-            .run(get(&origin.url("127.0.0.1", "/ews")))
-            .expect("a login");
-        assert_eq!(response.status().as_u16(), 200);
-
-        let log = origin.log();
-        assert!(log.len() >= 2, "{log:?}");
-        assert_eq!(log[0].authorization, None);
-        let authorization = log[1].authorization.as_deref().expect("a token");
-        assert!(authorization.starts_with("Negotiate "), "{authorization}");
-        // The token is SPNEGO (an ASN.1 application tag) or a bare NTLM message.
-        let token = token_of(authorization);
-        assert!(
-            token.first() == Some(&0x60) || token.starts_with(b"NTLMSSP\0"),
-            "{token:02x?}"
-        );
-        assert!(
-            log.iter()
-                .all(|entry| entry.connection == log[0].connection)
-        );
-        let users = origin.users();
-        assert_eq!(users.len(), 1);
-        let account = std::env::var("USERNAME").unwrap();
-        assert!(users[0].to_lowercase().ends_with(&account.to_lowercase()));
-    }
-
-    #[test]
-    fn ntlm_opens_with_a_body_less_message_and_sends_the_body_with_the_last() {
-        let origin = LoginOrigin::start(Demand::Security("NTLM"));
-        let client = OriginAgent::new(agent(true), negotiate());
-        let request = Request::post(origin.url("127.0.0.1", "/ews"))
-            .header(header::CONTENT_LENGTH, "23")
-            .body(b"<soap>0123456789</soap>".to_vec())
-            .unwrap();
-        let response = client.run(request).expect("a login");
-        assert_eq!(response.status().as_u16(), 200);
-
-        let log = origin.log();
-        assert_eq!(log.len(), 3, "{log:?}");
-        let second = log[1].authorization.as_deref().unwrap();
-        assert!(second.starts_with("NTLM "));
-        assert!(token_of(second).starts_with(b"NTLMSSP\0"));
-        assert_eq!(
-            log.iter()
-                .map(|entry| entry.body_length)
-                .collect::<Vec<_>>(),
-            [23, 0, 23]
-        );
-        assert!(
-            log.iter()
-                .all(|entry| entry.connection == log[0].connection)
-        );
-    }
-
-    #[test]
-    fn a_server_offering_only_basic_to_a_negotiate_rule_is_left_at_its_401() {
-        let origin = LoginOrigin::start(Demand::Basic("ada", "s3cret"));
-        let client = OriginAgent::new(agent(true), negotiate());
-        assert!(matches!(
-            client.run(get(&origin.url("127.0.0.1", "/"))),
-            Err(ureq::Error::StatusCode(401))
-        ));
-        assert_eq!(origin.log().len(), 1);
-    }
+#[test]
+fn a_server_offering_only_basic_to_a_negotiate_rule_is_left_at_its_401() {
+    let origin = LoginOrigin::start(Demand::Basic("ada", "s3cret"));
+    let rule = OriginAuth::builder()
+        .negotiate(["127.0.0.1"])
+        .build()
+        .unwrap();
+    let client = OriginAgent::new(agent(true), rule);
+    assert!(matches!(
+        client.run(get(&origin.url("127.0.0.1", "/"))),
+        Err(ureq::Error::StatusCode(401))
+    ));
+    assert_eq!(origin.log().len(), 1);
 }

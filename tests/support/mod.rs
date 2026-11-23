@@ -33,7 +33,7 @@ pub enum Require {
     Basic(&'static str, &'static str),
     /// A header, exactly: `(name, value)`.
     Header(&'static str, &'static str),
-    /// A Negotiate handshake, completed by the Windows security package.
+    /// A Negotiate challenge that is never satisfied.
     Negotiate,
 }
 
@@ -137,35 +137,6 @@ fn allowed(require: &Require, seen: &Seen) -> bool {
     }
 }
 
-/// One leg of a Negotiate handshake: allowed, or the challenge to answer with.
-#[cfg(all(windows, feature = "negotiate"))]
-fn negotiate(
-    seen: &Seen,
-    server: &mut sspi_server::SspiServer,
-    users: &Mutex<Vec<String>>,
-) -> Result<(), String> {
-    use base64::Engine as _;
-    let engine = base64::engine::general_purpose::STANDARD;
-    let Some(token) = seen
-        .header("proxy-authorization")
-        .and_then(|value| value.strip_prefix("Negotiate "))
-    else {
-        return Err("Negotiate".to_string());
-    };
-    let token = engine.decode(token).map_err(|_| "Negotiate".to_string())?;
-    match server.accept(&token) {
-        Ok(accepted) if accepted.complete => {
-            users
-                .lock()
-                .unwrap()
-                .push(server.user.clone().unwrap_or_default());
-            Ok(())
-        }
-        Ok(accepted) => Err(format!("Negotiate {}", engine.encode(accepted.token))),
-        Err(_) => Err("Negotiate".to_string()),
-    }
-}
-
 fn serve(
     mut client: TcpStream,
     require: &Require,
@@ -174,8 +145,6 @@ fn serve(
     users: &Mutex<Vec<String>>,
 ) {
     client.set_read_timeout(Some(Duration::from_secs(10))).ok();
-    #[cfg(all(windows, feature = "negotiate"))]
-    let mut sspi = matches!(require, Require::Negotiate).then(sspi_server::SspiServer::new);
     let _ = users;
     loop {
         let Some(seen) = read_head(&mut client) else {
@@ -183,13 +152,7 @@ fn serve(
         };
         log.lock().unwrap().push(seen.clone());
         let challenge = match require {
-            Require::Negotiate => {
-                #[cfg(all(windows, feature = "negotiate"))]
-                let verdict = negotiate(&seen, sspi.as_mut().unwrap(), users);
-                #[cfg(not(all(windows, feature = "negotiate")))]
-                let verdict: Result<(), String> = Err("Negotiate".to_string());
-                verdict.err()
-            }
+            Require::Negotiate => Some("Negotiate".to_string()),
             other => (!allowed(other, &seen)).then(|| "Basic realm=\"stand-in\"".to_string()),
         };
         if let Some(challenge) = challenge {
@@ -295,14 +258,9 @@ pub fn get(stream: &mut (impl Read + Write), host: &str) -> String {
     reply
 }
 
-#[cfg(all(windows, feature = "tls"))]
-pub mod cng_store;
 #[cfg(feature = "ureq")]
 pub mod login_origin;
 #[cfg(feature = "tls")]
 pub mod pki;
-pub mod socks_server;
-#[cfg(all(windows, feature = "negotiate"))]
-pub mod sspi_server;
 #[cfg(feature = "tls")]
 pub mod tls_server;

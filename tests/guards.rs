@@ -50,40 +50,21 @@ fn holding(directory: &str, needle: impl Fn(&str) -> bool) -> Vec<String> {
 }
 
 #[test]
-fn unsafe_code_is_only_in_the_files_that_meet_a_system_boundary() {
+fn the_facade_has_no_unsafe_code() {
     let uses_unsafe = |line: &str| {
         line.contains("unsafe {")
             || line.contains("unsafe fn")
             || line.contains("unsafe impl")
             || line.contains("unsafe extern")
     };
-    assert_eq!(
-        holding("src", uses_unsafe),
-        ["src/auth/sspi.rs", "src/system/winhttp.rs"]
-    );
-    assert_eq!(
-        holding("tests", |line| uses_unsafe(line)
-            && !line.contains("allow(unsafe_code")),
-        ["tests/support/cng_store.rs", "tests/support/sspi_server.rs"]
-    );
-}
-
-#[test]
-fn every_module_without_unsafe_is_covered_by_the_crate_wide_denial() {
+    assert_eq!(holding("src", uses_unsafe), Vec::<String>::new());
+    assert_eq!(holding("tests", uses_unsafe), Vec::<String>::new());
     let lib = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
-    assert!(lib.contains("#![deny(unsafe_code)]"));
-    // The two modules that allow it say so with a reason where they are declared.
-    let all = files_under("src");
-    let allowing: Vec<&str> = all
-        .iter()
-        .filter(|(_, source)| source.lines().any(|line| line.trim() == "unsafe_code,"))
-        .map(|(path, _)| path.as_str())
-        .collect();
-    assert_eq!(allowing, ["src/auth/mod.rs", "src/system/mod.rs"]);
+    assert!(lib.contains("#![forbid(unsafe_code)]"));
 }
 
 #[test]
-fn the_library_keeps_no_process_wide_state_beyond_the_pac_engines_dns_cache() {
+fn the_facade_keeps_no_process_wide_state() {
     let state = |line: &str| {
         line.starts_with("static ")
             || line.starts_with("pub static ")
@@ -93,12 +74,7 @@ fn the_library_keeps_no_process_wide_state_beyond_the_pac_engines_dns_cache() {
             || line.contains("LazyCell")
             || line.contains("lazy_static")
     };
-    // `GSS_MECH_NTLM` is an immutable object identifier; the DNS cache belongs to the thread that
-    // runs one script.
-    assert_eq!(
-        holding("src", state),
-        ["src/auth/gssapi.rs", "src/pac/mod.rs"]
-    );
+    assert_eq!(holding("src", state), Vec::<String>::new());
 }
 
 #[test]

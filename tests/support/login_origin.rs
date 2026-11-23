@@ -16,10 +16,6 @@ pub enum Demand {
     Nothing,
     /// `Authorization: Basic base64(user:password)`.
     Basic(&'static str, &'static str),
-    /// A Negotiate or NTLM exchange completed by the Windows security package; the connection is
-    /// authenticated once it completes, as IIS does for NTLM. `scheme` is the word offered.
-    #[cfg(all(windows, feature = "negotiate"))]
-    Security(&'static str),
     /// Redirect every request to this URL.
     Redirect(String),
 }
@@ -145,13 +141,6 @@ fn serve(
 ) {
     stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
     let _ = users;
-    #[cfg(all(windows, feature = "negotiate"))]
-    let mut security = match demand {
-        Demand::Security(_) => Some(super::sspi_server::SspiServer::new()),
-        _ => None,
-    };
-    #[cfg(all(windows, feature = "negotiate"))]
-    let mut authenticated = false;
     while let Some((request_line, headers, body_length)) = read_request(&mut stream) {
         let mut words = request_line.split(' ');
         let method = words.next().unwrap_or("").to_string();
@@ -184,61 +173,6 @@ fn serve(
             }
             Demand::Redirect(url) => {
                 reply(&mut stream, "302 Found", &[format!("Location: {url}")], "")
-            }
-            #[cfg(all(windows, feature = "negotiate"))]
-            Demand::Security(word) => {
-                let server = security.as_mut().unwrap();
-                let token = authorization
-                    .as_deref()
-                    .and_then(|value| value.split_once(' '))
-                    .filter(|(scheme, _)| {
-                        scheme.eq_ignore_ascii_case(word)
-                            || scheme.eq_ignore_ascii_case("negotiate")
-                            || scheme.eq_ignore_ascii_case("ntlm")
-                    })
-                    .and_then(|(_, token)| STANDARD.decode(token).ok());
-                match token {
-                    Some(token) => match server.accept(&token) {
-                        Ok(accepted) if accepted.complete => {
-                            authenticated = true;
-                            users
-                                .lock()
-                                .unwrap()
-                                .push(server.user.clone().unwrap_or_default());
-                            let closing = if accepted.token.is_empty() {
-                                Vec::new()
-                            } else {
-                                vec![format!(
-                                    "WWW-Authenticate: {word} {}",
-                                    STANDARD.encode(accepted.token)
-                                )]
-                            };
-                            reply(&mut stream, "200 OK", &closing, "welcome")
-                        }
-                        Ok(accepted) => reply(
-                            &mut stream,
-                            "401 Unauthorized",
-                            &[format!(
-                                "WWW-Authenticate: {word} {}",
-                                STANDARD.encode(accepted.token)
-                            )],
-                            "continue",
-                        ),
-                        Err(_) => reply(
-                            &mut stream,
-                            "401 Unauthorized",
-                            &[format!("WWW-Authenticate: {word}")],
-                            "denied",
-                        ),
-                    },
-                    None if authenticated => reply(&mut stream, "200 OK", &[], "welcome"),
-                    None => reply(
-                        &mut stream,
-                        "401 Unauthorized",
-                        &[format!("WWW-Authenticate: {word}")],
-                        "denied",
-                    ),
-                }
             }
         };
         if !sent {
