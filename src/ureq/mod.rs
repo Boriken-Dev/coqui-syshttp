@@ -35,6 +35,8 @@ pub struct AgentBuilder {
     connector: Option<ProxyConnector>,
     config: Option<Config>,
     adapter: AdapterSettings,
+    read_wait: Option<Duration>,
+    shared_tls: Option<Arc<Tls>>,
 }
 
 impl Default for AgentBuilder {
@@ -53,6 +55,8 @@ impl AgentBuilder {
             connector: None,
             config: None,
             adapter: AdapterSettings::default(),
+            read_wait: None,
+            shared_tls: None,
         }
     }
 
@@ -79,6 +83,20 @@ impl AgentBuilder {
     #[must_use]
     pub fn non_defaults(&self) -> Vec<String> {
         self.adapter.non_defaults()
+    }
+
+    /// The longest the agent waits on a connection at each step, whatever `ureq`'s own timeouts
+    /// allow (default: no limit of its own). A request's timeouts still apply.
+    pub fn read_wait(mut self, wait: Duration) -> Self {
+        self.read_wait = Some(wait);
+        self
+    }
+
+    /// The TLS configuration shared with other agents, so one keystore and one verifier serve
+    /// them all (instead of [`AgentBuilder::tls`]).
+    pub fn shared_tls(mut self, tls: Arc<Tls>) -> Self {
+        self.shared_tls = Some(tls);
+        self
     }
 
     /// Who decides the proxy (default: [`Resolver::system`]).
@@ -112,9 +130,10 @@ impl AgentBuilder {
     ///
     /// [`crate::Error::Tls`] when the operating system's verifier cannot start.
     pub fn build(self) -> Result<ureq::Agent, crate::Error> {
-        let tls = match self.tls {
-            Some(tls) => tls,
-            None => Tls::builder().build()?,
+        let shared = match (self.shared_tls, self.tls) {
+            (Some(shared), _) => shared,
+            (None, Some(tls)) => Arc::new(tls),
+            (None, None) => Arc::new(Tls::builder().build()?),
         };
         let connector = SystemConnector {
             resolver: self.resolver.unwrap_or_else(Resolver::system),
@@ -122,7 +141,8 @@ impl AgentBuilder {
                 .connector
                 .unwrap_or_default()
                 .with_failover(self.adapter.failover, self.adapter.bad_proxy_ttl),
-            tls: Arc::new(tls),
+            tls: shared,
+            read_wait: self.read_wait,
         };
         Ok(ureq::Agent::with_parts(
             self.config.unwrap_or_default(),
@@ -162,6 +182,7 @@ struct SystemConnector {
     resolver: Resolver,
     connector: ProxyConnector,
     tls: Arc<Tls>,
+    read_wait: Option<Duration>,
 }
 
 fn to_ureq(error: Error) -> ureq::Error {
@@ -203,6 +224,7 @@ impl Connector<()> for SystemConnector {
             return Ok(Some(StreamTransport {
                 io: Io::Plain(connection),
                 buffers,
+                read_wait: self.read_wait,
             }));
         }
         let config = self
@@ -224,6 +246,7 @@ impl Connector<()> for SystemConnector {
         Ok(Some(StreamTransport {
             io: Io::Tls(Box::new(stream)),
             buffers,
+            read_wait: self.read_wait,
         }))
     }
 }
@@ -271,6 +294,7 @@ impl Write for Io {
 struct StreamTransport {
     io: Io,
     buffers: LazyBuffers,
+    read_wait: Option<Duration>,
 }
 
 impl core::fmt::Debug for StreamTransport {
@@ -319,7 +343,9 @@ impl Transport for StreamTransport {
 
     fn await_input(&mut self, timeout: NextTimeout) -> Result<bool, ureq::Error> {
         let timeout = left(timeout.for_read())?;
-        self.io.socket().set_read_timeout(limit(timeout))?;
+        self.io
+            .socket()
+            .set_read_timeout(shorter(limit(timeout), self.read_wait))?;
         let input = self.buffers.input_append_buf();
         let amount = match self.io.read(input) {
             Err(error)
@@ -530,4 +556,13 @@ fn login_error(error: Error) -> ureq::Error {
         io::ErrorKind::PermissionDenied,
         error.to_string(),
     ))
+}
+
+/// The shorter of two optional limits; `None` is no limit.
+fn shorter(first: Option<Duration>, second: Option<Duration>) -> Option<Duration> {
+    match (first, second) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, None) => a,
+        (None, b) => b,
+    }
 }

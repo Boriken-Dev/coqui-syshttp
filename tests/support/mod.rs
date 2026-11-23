@@ -259,6 +259,8 @@ pub fn get(stream: &mut (impl Read + Write), host: &str) -> String {
 }
 
 #[cfg(feature = "ureq")]
+pub mod http_server;
+#[cfg(feature = "ureq")]
 pub mod login_origin;
 #[cfg(feature = "tls")]
 pub mod pki;

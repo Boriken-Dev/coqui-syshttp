@@ -43,7 +43,7 @@ hyper = [
 reqwest = ["tls", "dep:reqwest", "dep:rustls", "dep:tracing"]
 # The session layer: a client above `ureq` that owns redirects, cookies, tokens, hooks, retries and a deadline,
 # with its settings read through prefixed environment variables.
-session = ["ureq", "dep:url", "dep:regex", "dep:flate2", "dep:percent-encoding"]
+session = ["ureq", "dep:url", "dep:regex", "dep:flate2", "dep:percent-encoding", "dep:encoding_rs"]
 # JSON bodies and replies of the session layer.
 json = ["session", "dep:serde", "dep:serde_json"]
 # The session layer cookie jars as `reqwest` cookie stores.
@@ -75,6 +75,7 @@ url = { version = "2", optional = true }
 regex = { version = "1", optional = true }
 flate2 = { version = "1", optional = true }
 percent-encoding = { version = "2", optional = true }
+encoding_rs = { version = "0.8", optional = true }
 serde = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
 
