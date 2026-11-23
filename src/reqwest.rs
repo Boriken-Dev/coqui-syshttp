@@ -3,7 +3,9 @@
 //! The client is a plain [`::reqwest::Client`]: TLS is the family's rustls configuration
 //! (`use_preconfigured_tls`), and the proxy for each connection is the first usable route of the
 //! [`Resolver`] for that URL, asked again for every new connection, so a redirect to another host
-//! is routed afresh. `reqwest` makes the connection itself, so what its connector cannot do is
+//! is routed afresh (`reqwest` asks its `Proxy::custom` for every request it sends, each redirect
+//! hop included: a test follows a redirect to another host name and sees both asked).
+//! `reqwest` makes the connection itself, so what its connector cannot do is
 //! listed by [`Builder::not_applied`] rather than left out silently.
 
 use alloc::boxed::Box;
@@ -125,7 +127,8 @@ impl Builder {
             "Negotiate and NTLM proxy login, and the connector's reply limits and user agent",
             "SOCKS 4 and 4a, URL-prefix gateways and proxies with extra headers: skipped to the next route",
             "failover and bad_proxy_ttl: reqwest's connector cannot be replaced or retried, so a route that fails to connect fails the request",
-            "retries, token jars, hooks, the deadline and per-hop Proxy-Authorization rules of the session client",
+            "retries, token jars, hooks, the deadline across redirect hops and the per-hop Proxy-Authorization rules of the session client",
+            "the session reply limit, decode chunk and interim-reply bounds: a reqwest body is the caller's to bound",
         ]
     }
 
@@ -224,4 +227,60 @@ fn usable(proxy: &Proxy) -> Result<Url, &'static str> {
         .split_once("://")
         .map_or(text.as_str(), |(_, rest)| rest);
     Url::parse(&alloc::format!("{scheme}://{rest}")).map_err(|_| "an address reqwest cannot read")
+}
+
+/// A builder with the settings of a session [`SessionSettings`](crate::session::SessionSettings)
+/// that `reqwest` can honour: the connect and read timeouts, the deadline as the timeout of a
+/// whole request, the user agent and default headers, the idle connections kept per host and for
+/// how long, and a redirect policy that follows up to `max_redirects`. A cookie jar of the session
+/// layer plugs in with `reqwest::ClientBuilder::cookie_provider` through
+/// [`Builder::configure`]. Retries, token jars, hooks, the reply limit and decoding bounds belong
+/// to the session client: [`Builder::not_applied`] lists them.
+#[cfg(feature = "session-reqwest")]
+#[cfg_attr(docsrs, doc(cfg(feature = "session-reqwest")))]
+pub fn builder_from(settings: &crate::session::SessionSettings) -> Builder {
+    use ::reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+
+    let mut headers = HeaderMap::new();
+    for (name, value) in &settings.headers {
+        let (Ok(name), Some(Ok(value))) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            value.as_ref().map(|text| HeaderValue::from_str(text)),
+        ) else {
+            continue;
+        };
+        headers.insert(name, value);
+    }
+    let (connect, read, deadline) = (
+        settings.connect_timeout,
+        settings.read_timeout,
+        settings.deadline,
+    );
+    let user_agent = settings.user_agent.clone();
+    let per_host = settings.pool.max_idle_per_route;
+    let idle = settings.pool.idle_timeout;
+    let max_redirects = settings.max_redirects as usize;
+    Builder::new().configure(move |mut builder| {
+        if let Some(connect) = connect {
+            builder = builder.connect_timeout(connect);
+        }
+        if let Some(read) = read {
+            builder = builder.read_timeout(read);
+        }
+        if let Some(deadline) = deadline {
+            builder = builder.timeout(deadline);
+        }
+        builder
+            .user_agent(user_agent)
+            .default_headers(headers)
+            .pool_max_idle_per_host(per_host)
+            .pool_idle_timeout(idle)
+            .redirect(::reqwest::redirect::Policy::custom(move |attempt| {
+                if attempt.previous().len() > max_redirects {
+                    attempt.error("too many redirects")
+                } else {
+                    attempt.follow()
+                }
+            }))
+    })
 }
