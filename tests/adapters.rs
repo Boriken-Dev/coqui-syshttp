@@ -8,13 +8,18 @@ mod support;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use coqui_syshttp::tls::{ClientCertificates, Identity, Selector, Tls, Trust};
+#[cfg(any(feature = "ureq", feature = "hyper"))]
+use coqui_syshttp::tls::{ClientCertificates, Identity, Selector};
+use coqui_syshttp::tls::{Tls, Trust};
 use coqui_syshttp::{Credentials, Environment, Resolver};
-use support::pki::{Ca, Leaf};
+use support::pki::Ca;
+#[cfg(any(feature = "ureq", feature = "hyper"))]
+use support::pki::Leaf;
 use support::socks_server::SocksServer;
 use support::tls_server::{ClientAuth, TlsServer};
 use support::{Require, StandInOrigin, StandInProxy};
 
+#[cfg(any(feature = "ureq", feature = "hyper"))]
 fn identity(leaf: &Leaf) -> Identity {
     let key = rustls::crypto::ring::sign::any_supported_type(&leaf.key()).unwrap();
     Identity::new(leaf.chain.clone(), key, "pem").unwrap()
@@ -35,12 +40,14 @@ fn resolver(variable: &str, value: String) -> Resolver {
 }
 
 /// A server wanting a certificate from the corp CA, and the `Tls` that trusts it and holds one.
+#[cfg(any(feature = "ureq", feature = "hyper"))]
 struct Origin {
     server: TlsServer,
     tls: Tls,
     client: Leaf,
 }
 
+#[cfg(any(feature = "ureq", feature = "hyper"))]
 fn origin() -> Origin {
     let server_ca = Ca::new("Server CA");
     let client_ca = Ca::new("Corp Client CA");
