@@ -6,7 +6,10 @@
 //! in this process, protected by a random credential, that is the client's only proxy and sends
 //! every request through the family's connector, with its failover, `bad_proxy_ttl`, PAC, bypass
 //! rules, SOCKS, Negotiate and NTLM login and proxy reply limits. The relay lives exactly as long
-//! as the client and all its clones, and starting it needs a Tokio runtime.
+//! as the client and all its clones. The relay runs on a Tokio runtime: [`Builder::runtime`] names one,
+//! otherwise the one the building thread is in ([`coqui_proxy::relay::Relay::start`]), and building
+//! outside any runtime without it is an error. [`blocking`] is the same for `reqwest::blocking`, whose relay
+//! needs no runtime.
 //!
 //! With `failover(false)` there is no relay: the proxy of each connection is the first usable
 //! route of the [`Resolver`] for that URL, asked again for every new connection, so a redirect to
@@ -23,10 +26,14 @@ use core::time::Duration;
 
 use ::reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use ::reqwest::{ClientBuilder, Proxy as ReqwestProxy, Url};
-use coqui_proxy::relay::{Relay, RelayHandle};
+use coqui_proxy::relay::Relay;
 use coqui_proxy::{Proxy, ProxyConnector, ProxyScheme, RelaySettings, Resolver, Route};
 
 use crate::{AdapterSettings, Error};
+
+#[cfg(feature = "reqwest-blocking")]
+#[cfg_attr(docsrs, doc(cfg(feature = "reqwest-blocking")))]
+pub mod blocking;
 
 type Configure = Box<dyn FnOnce(ClientBuilder) -> ClientBuilder + Send>;
 
@@ -42,6 +49,7 @@ pub struct Builder {
     connector: Option<ProxyConnector>,
     adapter: AdapterSettings,
     relay: RelaySettings,
+    runtime: Option<tokio::runtime::Handle>,
     configure: Vec<Configure>,
 }
 
@@ -70,6 +78,7 @@ impl Builder {
             connector: None,
             adapter: AdapterSettings::default(),
             relay: RelaySettings::default(),
+            runtime: None,
             configure: Vec::new(),
         }
     }
@@ -123,6 +132,14 @@ impl Builder {
         self
     }
 
+    /// The Tokio runtime the relay runs on (default: the runtime the thread that builds the client is
+    /// in; building outside one is an error). The runtime must outlive the client: when it is shut
+    /// down, the relay stops serving. Without the relay (`failover(false)`) it is not used.
+    pub fn runtime(mut self, runtime: tokio::runtime::Handle) -> Self {
+        self.runtime = Some(runtime);
+        self
+    }
+
     /// Changes the `reqwest` client builder before the client is made (timeouts, pool, headers,
     /// cookies, redirects). Its proxy and TLS settings are replaced by this builder's.
     pub fn configure(
@@ -146,28 +163,15 @@ impl Builder {
     /// What this adapter cannot do, because `reqwest` makes the connection itself.
     ///
     /// With the relay (`failover` on) `reqwest` only talks to a loopback proxy, so the list is
-    /// short; without it the proxy is chosen by `reqwest` from the first usable route.
+    /// short; without it the proxy is chosen by `reqwest` from the first usable route. With the
+    /// relay it also lists the [`RelaySettings`] that mean nothing to a relay on a Tokio runtime.
     #[must_use]
     pub fn not_applied(&self) -> Vec<&'static str> {
-        let mut list = alloc::vec![
-            "per-host certificate memory: the TLS configuration is chosen without the host name",
-            "retries, token jars, hooks, the deadline across redirect hops and the per-hop Proxy-Authorization rules of the session client",
-            "the session reply limit, decode chunk and interim-reply bounds: a reqwest body is the caller's to bound",
-        ];
+        let mut list = not_applied(self.adapter.failover);
         if self.adapter.failover {
-            list.push("URL-prefix gateways: skipped to the next route");
-            list.push(
-                "an Upgrade request over plain http: the relay forwards only CONNECT tunnels and plain requests",
-            );
-        } else {
-            list.push(
-                "Negotiate and NTLM proxy login, and the connector's reply limits and user agent",
-            );
-            list.push(
-                "SOCKS 4 and 4a, URL-prefix gateways and proxies with extra headers: skipped to the next route",
-            );
-            list.push(
-                "failover: the first usable route is the proxy, and a route that fails to connect fails the request",
+            list.extend(
+                Relay::builder(ProxyConnector::default().asynch(), Resolver::system())
+                    .not_applied(),
             );
         }
         list
@@ -193,11 +197,17 @@ impl Builder {
                 .unwrap_or_default()
                 .with_failover(true, self.adapter.bad_proxy_ttl)
                 .asynch();
-            relay_proxy(
-                Relay::builder(connector, resolver)
-                    .settings(self.relay)
-                    .start()?,
-            )?
+            let relay = Relay::builder(connector, resolver).settings(self.relay);
+            let relay = match &self.runtime {
+                Some(runtime) => relay.start_on(runtime)?,
+                None => relay.start()?,
+            };
+            let (url, name, token) = (
+                relay.proxy_url(),
+                relay.token_header().0,
+                relay.token_header().1.to_string(),
+            );
+            relay_proxy(&url, name, &token, relay)?
         } else {
             system_proxy(resolver)
         };
@@ -237,6 +247,32 @@ pub fn builder() -> Builder {
     Builder::new()
 }
 
+/// What `reqwest`'s own connector cannot do, with the relay (`failover` on) or without it.
+pub(crate) fn not_applied(failover: bool) -> Vec<&'static str> {
+    let mut list = alloc::vec![
+        "per-host certificate memory: the TLS configuration is chosen without the host name",
+        "retries, token jars, hooks, the deadline across redirect hops and the per-hop Proxy-Authorization rules of the session client",
+        "the session reply limit, decode chunk and interim-reply bounds: a reqwest body is the caller's to bound",
+    ];
+    if failover {
+        list.push("URL-prefix gateways: skipped to the next route");
+        list.push(
+            "an Upgrade request over plain http: the relay forwards only CONNECT tunnels and plain requests",
+        );
+    } else {
+        list.push(
+            "Negotiate and NTLM proxy login, and the connector's reply limits and user agent",
+        );
+        list.push(
+            "SOCKS 4 and 4a, URL-prefix gateways and proxies with extra headers: skipped to the next route",
+        );
+        list.push(
+            "failover: the first usable route is the proxy, and a route that fails to connect fails the request",
+        );
+    }
+    list
+}
+
 /// A `reqwest` proxy that is the relay for every URL, with the relay's credential.
 ///
 /// The credential is the relay's token header, not `Proxy-Authorization`: `reqwest` removes that
@@ -246,10 +282,16 @@ pub fn builder() -> Builder {
 ///
 /// The relay is owned by the proxy's closure, which `reqwest` keeps for as long as the client and
 /// its clones live, so the relay stops with the last of them and never before.
-fn relay_proxy(relay: RelayHandle) -> Result<ReqwestProxy, Error> {
-    let target = Url::parse(&relay.proxy_url())
+///
+/// `owner` is whatever keeps the relay running (its handle): the closure owns it.
+pub(crate) fn relay_proxy<T: Send + Sync + 'static>(
+    url: &str,
+    name: &str,
+    token: &str,
+    owner: T,
+) -> Result<ReqwestProxy, Error> {
+    let target = Url::parse(url)
         .map_err(|_| Error::Http(crate::Reason::new("the relay's address is not a URL")))?;
-    let (name, token) = relay.token_header();
     let (Ok(name), Ok(mut token)) = (
         HeaderName::from_bytes(name.as_bytes()),
         HeaderValue::from_str(token),
@@ -262,14 +304,14 @@ fn relay_proxy(relay: RelayHandle) -> Result<ReqwestProxy, Error> {
     let mut headers = HeaderMap::new();
     headers.insert(name, token);
     Ok(ReqwestProxy::custom(move |_url: &Url| -> Option<Url> {
-        let _keep: &RelayHandle = &relay;
+        let _keep: &T = &owner;
         Some(target.clone())
     })
     .headers(headers))
 }
 
 /// A `reqwest` proxy that answers each URL with the first usable route of `resolver`.
-fn system_proxy(resolver: Resolver) -> ReqwestProxy {
+pub(crate) fn system_proxy(resolver: Resolver) -> ReqwestProxy {
     ReqwestProxy::custom(move |url: &Url| -> Option<Url> {
         let routes = match resolver.lookup(url.as_str()) {
             Ok(routes) => routes,

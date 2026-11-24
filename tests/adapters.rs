@@ -181,7 +181,7 @@ mod reqwest_client {
     use super::*;
 
     /// A server that asks for no client certificate, and a configuration that trusts it.
-    fn plain_origin() -> (TlsServer, Arc<rustls::ClientConfig>) {
+    pub(super) fn plain_origin() -> (TlsServer, Arc<rustls::ClientConfig>) {
         let ca = Ca::new("Server CA");
         let server = TlsServer::start(
             &ca.issue_server_for(&["app.internal.test", "localhost"]),
@@ -285,7 +285,7 @@ mod reqwest_client {
     }
 
     /// A closed port, then a live proxy.
-    fn dead_then(live: SocketAddr) -> String {
+    pub(super) fn dead_then(live: SocketAddr) -> String {
         format!("PROXY {}; PROXY {live}", dead())
     }
 
@@ -405,12 +405,43 @@ mod reqwest_client {
             matches!(started, Err(coqui_syshttp::Error::Proxy(_))),
             "{started:?}"
         );
+        // The error says how to give it one.
+        assert!(
+            started.unwrap_err().to_string().contains("start_on"),
+            "the error names start_on"
+        );
         assert!(
             coqui_syshttp::reqwest::builder()
                 .failover(false)
                 .build()
                 .is_ok()
         );
+    }
+
+    #[tokio::test]
+    async fn the_relay_runs_on_the_runtime_the_builder_names() {
+        let (server, config) = plain_origin();
+        let proxy = StandInProxy::start(Require::Nothing, server.addr);
+        let relay_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let handle = relay_runtime.handle().clone();
+        // The thread that builds is in no runtime: the relay goes to the one it is given.
+        let builder = coqui_syshttp::reqwest::builder()
+            .resolver(resolver("ALL_PROXY", dead_then(proxy.addr)))
+            .tls_config(config)
+            .runtime(handle);
+        let client = std::thread::spawn(move || builder.build().unwrap())
+            .join()
+            .unwrap();
+        assert_eq!(
+            text(&client, "https://app.internal.test/").await.unwrap(),
+            "no client certificate"
+        );
+        drop(client);
+        relay_runtime.shutdown_background();
     }
 
     #[tokio::test]
@@ -457,5 +488,176 @@ mod ureq_agent {
             .bad_proxy_ttl(std::time::Duration::from_secs(1));
         assert_eq!(once.non_defaults().len(), 1);
         assert!(get(&once.build().unwrap()).is_err());
+    }
+}
+
+#[cfg(feature = "reqwest-blocking")]
+mod reqwest_blocking {
+    use super::reqwest_client::{dead_then, plain_origin};
+    use super::*;
+
+    fn text(client: &::reqwest::blocking::Client, url: &str) -> Result<String, ::reqwest::Error> {
+        client.get(url).send()?.text()
+    }
+
+    #[test]
+    fn https_and_http_fetches_fail_over_from_a_dead_proxy_to_a_live_one() {
+        let (server, config) = plain_origin();
+        let secure = StandInProxy::start(Require::Basic("ada", "s3cret"), server.addr);
+        let client = coqui_syshttp::reqwest::blocking::builder()
+            .resolver(resolver("ALL_PROXY", dead_then(secure.addr)))
+            .tls_config(Arc::clone(&config))
+            .build()
+            .unwrap();
+        assert_eq!(
+            text(&client, "https://app.internal.test/").unwrap(),
+            "no client certificate"
+        );
+        assert_eq!(
+            secure.seen()[0].request_line,
+            "CONNECT app.internal.test:443 HTTP/1.1"
+        );
+
+        let origin = StandInOrigin::start("plain http");
+        let plain = StandInProxy::start(Require::Basic("ada", "s3cret"), origin.addr);
+        let client = coqui_syshttp::reqwest::blocking::builder()
+            .resolver(resolver("ALL_PROXY", dead_then(plain.addr)))
+            .tls_config(config)
+            .build()
+            .unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                text(&client, "http://app.internal.test/data").unwrap(),
+                "plain http"
+            );
+        }
+        // The relay dials the destination through the live proxy with the system's login.
+        let seen = plain.seen();
+        assert_eq!(seen.len(), 2);
+        assert!(seen.iter().all(|seen| {
+            seen.request_line == "CONNECT app.internal.test:80 HTTP/1.1"
+                && seen.header("proxy-authorization") == Some("Basic YWRhOnMzY3JldA==")
+        }));
+    }
+
+    #[test]
+    fn without_failover_the_same_fetch_fails_as_before() {
+        let (server, config) = plain_origin();
+        let secure = StandInProxy::start(Require::Basic("ada", "s3cret"), server.addr);
+        let client = coqui_syshttp::reqwest::blocking::builder()
+            .resolver(resolver("ALL_PROXY", dead_then(secure.addr)))
+            .tls_config(config)
+            .failover(false)
+            .build()
+            .unwrap();
+        assert!(text(&client, "https://app.internal.test/").is_err());
+        assert!(secure.seen().is_empty());
+    }
+
+    #[test]
+    fn through_a_basic_proxy_and_a_socks_proxy() {
+        let (server, config) = plain_origin();
+        let proxy = StandInProxy::start(Require::Basic("ada", "s3cret"), server.addr);
+        let client = coqui_syshttp::reqwest::blocking::builder()
+            .resolver(resolver("HTTPS_PROXY", proxy.proxy_url()))
+            .tls_config(Arc::clone(&config))
+            .build()
+            .unwrap();
+        assert_eq!(
+            text(&client, "https://app.internal.test/").unwrap(),
+            "no client certificate"
+        );
+        let socks = SocksServer::start(server.addr, None);
+        let client = coqui_syshttp::reqwest::blocking::builder()
+            .resolver(resolver("HTTPS_PROXY", format!("socks5://{}", socks.addr)))
+            .tls_config(config)
+            .build()
+            .unwrap();
+        assert_eq!(
+            text(&client, "https://app.internal.test/").unwrap(),
+            "no client certificate"
+        );
+        assert!(socks.asked()[0].name);
+    }
+
+    fn refuses(address: SocketAddr) -> bool {
+        for _ in 0..100 {
+            if std::net::TcpStream::connect(address).is_err() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
+    }
+
+    #[test]
+    fn the_relay_lives_as_long_as_the_client_and_its_clones() {
+        let (server, config) = plain_origin();
+        let proxy = StandInProxy::start(Require::Nothing, server.addr);
+        let address = dead();
+        let mut settings = coqui_syshttp::proxy::RelaySettings::default();
+        settings.port = address.port();
+        let builder = coqui_syshttp::reqwest::blocking::builder()
+            .resolver(resolver("ALL_PROXY", dead_then(proxy.addr)))
+            .tls_config(config)
+            .relay_settings(settings);
+        let client = builder.build().unwrap();
+        // The builder is gone; the client still reaches the origin through its relay.
+        assert!(std::net::TcpStream::connect(address).is_ok());
+        let clone = client.clone();
+        drop(client);
+        assert_eq!(
+            text(&clone, "https://app.internal.test/").unwrap(),
+            "no client certificate"
+        );
+        drop(clone);
+        assert!(refuses(address), "the relay outlived its client");
+    }
+
+    #[test]
+    fn building_needs_no_runtime_and_the_lists_follow_the_async_adapter() {
+        // A plain thread with no Tokio runtime of ours: the relay has its own threads.
+        let client = coqui_syshttp::reqwest::blocking::builder().build();
+        assert!(client.is_ok(), "{client:?}");
+        let relayed = coqui_syshttp::reqwest::blocking::builder();
+        let direct = coqui_syshttp::reqwest::blocking::builder().failover(false);
+        // What the async adapter lists, but the settings that mean nothing to a relay on a Tokio
+        // runtime: this relay has threads to join and to poll.
+        let asynchronous = coqui_syshttp::reqwest::builder().not_applied();
+        assert!(
+            relayed
+                .not_applied()
+                .iter()
+                .all(|line| asynchronous.contains(line))
+        );
+        assert!(
+            asynchronous
+                .iter()
+                .any(|line| line.starts_with("shutdown_wait"))
+        );
+        assert!(
+            !relayed
+                .not_applied()
+                .iter()
+                .any(|line| line.starts_with("shutdown_wait"))
+        );
+        assert!(
+            direct
+                .not_applied()
+                .iter()
+                .any(|line| line.contains("failover"))
+        );
+        assert_eq!(direct.non_defaults().len(), 1);
+        assert!(relayed.non_defaults().is_empty());
+    }
+
+    #[test]
+    fn a_relay_that_is_not_loopback_is_refused() {
+        let mut settings = coqui_syshttp::proxy::RelaySettings::default();
+        settings.address = "0.0.0.0".parse().unwrap();
+        let built = coqui_syshttp::reqwest::blocking::builder()
+            .relay_settings(settings)
+            .build();
+        assert!(matches!(built, Err(coqui_syshttp::Error::Proxy(_))));
     }
 }
