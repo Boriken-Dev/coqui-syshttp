@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Boriken-Dev/coqui-syshttp"
 keywords = ["proxy", "pac", "tls", "client-certificate", "system"]
 categories = ["network-programming", "web-programming::http-client"]
-exclude = [".*", "*.local.*", "/tools/"]
+exclude = [".*", "*.local.*", "/tools/", "/packaging/"]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -4,6 +4,11 @@
 !/.gitignore
 !/.gitattributes
 !/.github/
+!/.env.example
+
+# Overrides of the container build: the committed list is .env.example.
+/.env
+/.env.local
 
 # Private agent config and personal overrides, at any depth. No trailing slash:
 # `.agents` can be a symlink, which git treats as a file.

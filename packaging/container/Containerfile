@@ -1,0 +1,89 @@
+# coqui-syshttp in a container: the library is built and its tests run from the deps branch, with no network after the
+# toolchain is installed. A library ships no image: the stages are the point, and nothing is published. It is built
+# through the build tool, which supplies the build contexts and the overrides of `.env` (see `.env.example`):
+#
+#   python3 tools/build.py container build --target build   # compile the library, offline
+#   python3 tools/build.py container test                   # `cargo test --all-features`, offline, in the same container
+#   python3 tools/build.py container build --print         # the effective overrides and the engine command
+#
+# `docker` works the same (CONTAINER_ENGINE=docker). `container build` without --target runs every stage, the tests
+# included.
+#
+# Stages: `sdk` installs the toolchain (online, from a base pinned by digest and a rustup-init checked against its
+# hash), `build` and `test` run with no network from the deps branch. Every ARG default below is a pin that
+# tools/build.cfg holds equal to tools/sdk.lock (`python3 tools/build.py sdk check`). A plain `podman build` lacks the
+# `deps` and `ca` build contexts and fails; use the build tool.
+
+ARG BASE_IMAGE=docker.io/library/rust:1.89-bookworm@sha256:948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88c07bb14563c84ff
+
+FROM ${BASE_IMAGE} AS sdk
+ARG RUST_VERSION=1.100.0
+ARG RUSTUP_VERSION=1.29.2
+ARG RUSTUP_INIT_SHA256_X86_64=5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4
+ARG RUSTUP_INIT_SHA256_AARCH64=a9c168dbea81a84671c6b7a5c1795cb0eb699020110d107ddfca427bd797e697
+ARG RUSTUP_INIT_BASE_URL=https://static.rust-lang.org/rustup/archive
+ARG RUSTUP_DIST_SERVER=
+ARG RUSTUP_UPDATE_ROOT=
+ARG APT_MIRROR=
+ARG EXTRA_CA_CERT=
+# The toolchain lives apart from the base image's own, so what builds is what the lock names.
+ENV RUSTUP_HOME=/opt/sdk/rustup CARGO_HOME=/opt/sdk/cargo PATH=/opt/sdk/cargo/bin:${PATH}
+
+# A certificate for a TLS-inspecting proxy: trusted in this stage only.
+RUN --mount=type=bind,from=ca,target=/mnt/ca \
+    set -eu; \
+    if [ -n "${EXTRA_CA_CERT}" ]; then \
+        install -D -m 0644 "/mnt/ca/${EXTRA_CA_CERT}" /usr/local/share/ca-certificates/extra-ca.crt; \
+        update-ca-certificates; \
+    fi
+
+# `offline plan` is Python (3.11 or later, standard library only), and the `negotiate` feature, which the tests build,
+# links the system's GSSAPI library and generates its bindings. Debian's rust image carries python3; what is missing is
+# installed here, the one use of APT_MIRROR.
+RUN set -eu; \
+    missing=""; \
+    command -v python3 >/dev/null 2>&1 || missing="${missing} python3"; \
+    pkg-config --exists krb5-gssapi >/dev/null 2>&1 || missing="${missing} libkrb5-dev"; \
+    ls /usr/lib/llvm-*/lib/libclang.so* /usr/lib/*/libclang*.so* >/dev/null 2>&1 || missing="${missing} libclang-dev"; \
+    [ -n "${missing}" ] || exit 0; \
+    if [ -n "${APT_MIRROR}" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i -E "s|^(URIs: )https?://deb\.debian\.org/debian$|\1${APT_MIRROR}|" /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ${missing}; \
+    rm -rf /var/lib/apt/lists/*
+
+# rustup-init is checked against the lock's hash before it runs, whatever RUSTUP_INIT_BASE_URL says.
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64) triple=x86_64-unknown-linux-gnu; sha256="${RUSTUP_INIT_SHA256_X86_64}" ;; \
+        aarch64) triple=aarch64-unknown-linux-gnu; sha256="${RUSTUP_INIT_SHA256_AARCH64}" ;; \
+        *) echo "no rustup-init hash for $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    [ -n "${RUSTUP_DIST_SERVER}" ] || unset RUSTUP_DIST_SERVER; \
+    [ -n "${RUSTUP_UPDATE_ROOT}" ] || unset RUSTUP_UPDATE_ROOT; \
+    curl --fail --silent --show-error --location "${RUSTUP_INIT_BASE_URL}/${RUSTUP_VERSION}/${triple}/rustup-init" --output /tmp/rustup-init; \
+    echo "${sha256}  /tmp/rustup-init" | sha256sum --check --strict -; \
+    chmod +x /tmp/rustup-init; \
+    /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "${RUST_VERSION}"; \
+    rm /tmp/rustup-init; \
+    rustup set auto-self-update disable; \
+    cargo --version
+
+FROM sdk AS build
+WORKDIR /src
+ENV CARGO_NET_OFFLINE=true
+# The sources `offline plan` and cargo read: the manifest, the README the library's documentation includes, the build
+# tool and the crate's source.
+COPY Cargo.toml Cargo.lock README.md ./
+COPY src src
+COPY tools/build.py tools/build.cfg tools/sdk.lock tools/
+COPY --from=deps /crates /deps/crates
+# The cargo home that replaces crates.io and each git source by /deps/crates, written only when it covers Cargo.lock.
+RUN --network=none python3 tools/build.py offline plan --deps /deps --out /opt/offline
+RUN --network=none cargo --config /opt/offline/cargo-home/config.toml build --release --locked --offline --all-features
+
+FROM build AS test
+# What the tests read besides the source: the integration tests and their support files.
+COPY tests tests
+RUN --network=none cargo --config /opt/offline/cargo-home/config.toml test --all-features --locked --offline
