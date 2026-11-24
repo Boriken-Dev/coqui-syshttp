@@ -50,7 +50,7 @@ json = ["session", "dep:serde", "dep:serde_json"]
 session-reqwest = ["session", "reqwest", "reqwest/cookies"]
 
 [dependencies]
-coqui-proxy = { git = "https://github.com/Boriken-Dev/coqui-proxy", rev = "089a713c5a18e1fb88df1975efd377a0779e5db9" }
+coqui-proxy = { git = "https://github.com/Boriken-Dev/coqui-proxy", rev = "e66b9ce26b9f0d2dc18f2262ec015742b2fe4829" }
 coqui-sslcontext = { git = "https://github.com/Boriken-Dev/coqui-sslcontext", rev = "955cd9a455a288a523418daad7e846008c2bf291", optional = true }
 # Error boilerplate.
 thiserror = "2"
