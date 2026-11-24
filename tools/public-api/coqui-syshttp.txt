@@ -73,6 +73,28 @@ pub fn coqui_syshttp::hyper::Stream::connected(&self) -> hyper_util::client::leg
 pub fn coqui_syshttp::hyper::builder<B>() -> coqui_syshttp::hyper::Builder<B>
 pub fn coqui_syshttp::hyper::client<B>() -> core::result::Result<hyper_util::client::legacy::client::Client<coqui_syshttp::hyper::HttpsConnector, B>, coqui_syshttp::Error> where B: http_body::Body + core::marker::Send + 'static + core::marker::Unpin, <B as http_body::Body>::Data: core::marker::Send, <B as http_body::Body>::Error: core::convert::Into<alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>>
 pub mod coqui_syshttp::reqwest
+pub mod coqui_syshttp::reqwest::blocking
+pub struct coqui_syshttp::reqwest::blocking::Builder
+impl coqui_syshttp::reqwest::blocking::Builder
+pub fn coqui_syshttp::reqwest::blocking::Builder::adapter_settings(self, coqui_syshttp::AdapterSettings) -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::bad_proxy_ttl(self, core::time::Duration) -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::build(self) -> core::result::Result<reqwest::blocking::client::Client, coqui_syshttp::Error>
+pub fn coqui_syshttp::reqwest::blocking::Builder::client_builder(self) -> core::result::Result<reqwest::blocking::client::ClientBuilder, coqui_syshttp::Error>
+pub fn coqui_syshttp::reqwest::blocking::Builder::configure(self, impl core::ops::function::FnOnce(reqwest::blocking::client::ClientBuilder) -> reqwest::blocking::client::ClientBuilder + core::marker::Send + 'static) -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::connector(self, coqui_proxy::connect::ProxyConnector) -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::failover(self, bool) -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::new() -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn coqui_syshttp::reqwest::blocking::Builder::not_applied(&self) -> alloc::vec::Vec<&'static str>
+pub fn coqui_syshttp::reqwest::blocking::Builder::relay_settings(self, coqui_proxy::settings::RelaySettings) -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::resolver(self, coqui_proxy::resolver::Resolver) -> Self
+pub fn coqui_syshttp::reqwest::blocking::Builder::tls_config(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
+impl core::default::Default for coqui_syshttp::reqwest::blocking::Builder
+pub fn coqui_syshttp::reqwest::blocking::Builder::default() -> Self
+impl core::fmt::Debug for coqui_syshttp::reqwest::blocking::Builder
+pub fn coqui_syshttp::reqwest::blocking::Builder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn coqui_syshttp::reqwest::blocking::builder() -> coqui_syshttp::reqwest::blocking::Builder
+pub fn coqui_syshttp::reqwest::blocking::client() -> core::result::Result<reqwest::blocking::client::Client, coqui_syshttp::Error>
 pub struct coqui_syshttp::reqwest::Builder
 impl coqui_syshttp::reqwest::Builder
 pub fn coqui_syshttp::reqwest::Builder::adapter_settings(self, coqui_syshttp::AdapterSettings) -> Self
@@ -87,6 +109,7 @@ pub fn coqui_syshttp::reqwest::Builder::non_defaults(&self) -> alloc::vec::Vec<a
 pub fn coqui_syshttp::reqwest::Builder::not_applied(&self) -> alloc::vec::Vec<&'static str>
 pub fn coqui_syshttp::reqwest::Builder::relay_settings(self, coqui_proxy::settings::RelaySettings) -> Self
 pub fn coqui_syshttp::reqwest::Builder::resolver(self, coqui_proxy::resolver::Resolver) -> Self
+pub fn coqui_syshttp::reqwest::Builder::runtime(self, tokio::runtime::handle::Handle) -> Self
 pub fn coqui_syshttp::reqwest::Builder::tls_config(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
 impl core::default::Default for coqui_syshttp::reqwest::Builder
 pub fn coqui_syshttp::reqwest::Builder::default() -> Self

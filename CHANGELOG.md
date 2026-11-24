@@ -21,7 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   caller's Tokio runtime and gives `reqwest` that loopback proxy and its random credential as its only proxy, so
   `failover`, `bad_proxy_ttl`, SOCKS 4, Negotiate and NTLM login and the connector's reply limits apply; the relay
   lives as long as the client and its clones. `reqwest::Builder::relay_settings`. `failover(false)` keeps the
-  `Proxy::custom` path.
+  `Proxy::custom` path. `reqwest::Builder::runtime` names the Tokio runtime handle the relay runs on.
+- `reqwest::blocking` (feature `reqwest-blocking`): the same builder for `reqwest::blocking::Client`, with failover
+  through `coqui_proxy::relay::blocking`, a relay on threads of its own that needs no Tokio runtime and stops, joining
+  them, after the last clone of the client drops.
 - `hyper` and `reqwest` modules (features of the same names): a `hyper-util` client and a `reqwest` client
   that follow the system's proxy, proxy login and TLS; `AdapterSettings` (`failover`, `bad_proxy_ttl`) on the
   three adapters' builders, `ureq::AgentBuilder::{failover, bad_proxy_ttl}`.

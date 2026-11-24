@@ -20,7 +20,8 @@ own `AGENTS.md`:
 | `pkcs11` | `tls`, `coqui-sslcontext/pkcs11` | client certificates on PKCS #11 tokens | off |
 | `ureq` | `tls`, `ureq` 3.5, `rustls` | the `ureq` module and `agent()` | off |
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper`, `hyper-util`, `tokio`, `tokio-rustls`, `tower-service` | the `hyper` module: `client()` | off |
-| `reqwest` | `tls`, `coqui-proxy/relay`, `reqwest` 0.13 (no TLS backend of its own, `socks`), `rustls`, `tracing` | the `reqwest` module: `client()` | off |
+| `reqwest` | `tls`, `coqui-proxy/relay`, `reqwest` 0.13 (no TLS backend of its own, `socks`), `rustls`, `tracing`, `tokio` (the runtime handle) | the `reqwest` module: `client()` | off |
+| `reqwest-blocking` | `reqwest`, `reqwest/blocking`, `coqui-proxy/relay-blocking` | the `reqwest::blocking` module: `client()` | off |
 | `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs`, `percent-encoding` | the `session` module | off |
 | `json` | `session`, `serde`, `serde_json` | `Response::json`, `FetchBuilder::json` | off |
 | `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` | off |
@@ -125,6 +126,7 @@ impl Builder {
     pub fn connector(self, connector: ProxyConnector) -> Self;
     pub fn failover(self, bool) -> Self; pub fn bad_proxy_ttl(self, Duration) -> Self; pub fn adapter_settings(self, AdapterSettings) -> Self;
     pub fn relay_settings(self, RelaySettings) -> Self;                   // the relay's bounds (failover on)
+    pub fn runtime(self, tokio::runtime::Handle) -> Self;                 // the runtime the relay runs on (failover on)
     pub fn configure(self, f: impl FnOnce(reqwest::ClientBuilder) -> reqwest::ClientBuilder + Send + 'static) -> Self;
     pub fn client_builder(self) -> Result<reqwest::ClientBuilder, Error>;  // proxy and TLS set; add more, then build
     pub fn build(self) -> Result<reqwest::Client, Error>;
@@ -146,7 +148,9 @@ proxy is one of two things:
   gets the connector's failover and failed-proxy memory, PAC, rules, SOCKS 4/4a/5, Negotiate and NTLM login,
   proxy TLS and reply limits, and a direct route is dialled by the relay. **The relay lives exactly as long as
   the client and all its clones** (the proxy closure `reqwest` keeps owns the `RelayHandle`); the builder may
-  be dropped. Building **needs a Tokio runtime** (`Error::Proxy(Io)` otherwise); `relay_settings` sets the
+  be dropped. Building **needs a Tokio runtime** for the relay: the one the building thread is in, or the one
+  `runtime(handle)` names (`Error::Proxy(Io)` otherwise, its message names `start_on`; a relay on a given
+  runtime stops serving when that runtime is shut down); `relay_settings` sets the
   bounds (connections, head time and size, idle time; the address must be loopback, else `Error::Proxy`).
   `not_applied()` then lists only per-host certificate memory, the session client's own features, URL-prefix
   gateways (skipped to the next route) and `Upgrade` requests over plain `http:`.
@@ -155,6 +159,32 @@ proxy is one of two things:
   skipped to the next route and, when none is usable, the request fails (it never goes direct past the proxy
   the system asked for). A route that fails to connect fails the request; Negotiate and NTLM proxy login and
   the connector's reply limits are not available, and `not_applied()` says so. No runtime is needed.
+
+### Module `reqwest::blocking` (feature `reqwest-blocking`)
+
+```rust
+pub fn client() -> Result<reqwest::blocking::Client, Error>;
+pub fn builder() -> Builder;   // reqwest::blocking::Builder
+impl Builder {
+    pub fn new() -> Self;
+    pub fn resolver(self, Resolver) -> Self; pub fn tls_config(self, Arc<rustls::ClientConfig>) -> Self; pub fn connector(self, ProxyConnector) -> Self;
+    pub fn failover(self, bool) -> Self; pub fn bad_proxy_ttl(self, Duration) -> Self; pub fn adapter_settings(self, AdapterSettings) -> Self;
+    pub fn relay_settings(self, RelaySettings) -> Self;
+    pub fn configure(self, f: impl FnOnce(reqwest::blocking::ClientBuilder) -> reqwest::blocking::ClientBuilder + Send + 'static) -> Self;
+    pub fn client_builder(self) -> Result<reqwest::blocking::ClientBuilder, Error>;
+    pub fn build(self) -> Result<reqwest::blocking::Client, Error>;
+    pub fn non_defaults(&self) -> Vec<String>; pub fn not_applied(&self) -> Vec<&'static str>;
+}
+```
+
+The async adapter's surface for `reqwest::blocking::Client`, without `runtime`: with `failover` on, `build()` starts
+a `coqui_proxy::relay::blocking::Relay` (threads of its own, **no Tokio runtime needed**, the builder's `connector`
+with `failover` and `bad_proxy_ttl`) and gives `reqwest` its loopback address and token header as the only proxy,
+exactly as the async adapter does. The relay lives as long as the client and its clones (the `Proxy::custom`
+closure owns the handle) and, when the last clone drops, closes its listener and joins its threads. `failover(false)`
+is the plain `Proxy::custom` route. `reqwest::blocking` runs a Tokio runtime of its own on a thread of its own; the
+relay adds none. Building a blocking client inside a Tokio runtime is `reqwest`'s restriction. `not_applied()` is
+the async adapter's list.
 
 ## Errors
 
