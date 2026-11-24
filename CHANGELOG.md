@@ -38,3 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   decoding). Not ported: import-time patching and the settings that name Python code.
 - `reqwest::builder_from(&SessionSettings)` and `reqwest` cookie stores over the session jars (feature
   `session-reqwest`); `ureq::AgentBuilder::{read_wait, shared_tls}`; `VERSION`.
+- `tools/sdk.lock` and the `deps` branch's pin in it; `packaging/container/Containerfile` builds the library and runs its tests
+  from the `deps` branch with no network, through `python3 tools/build.py container build|test`; `.env.example` lists the
+  overrides.
