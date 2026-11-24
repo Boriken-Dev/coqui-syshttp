@@ -20,7 +20,7 @@ own `AGENTS.md`:
 | `pkcs11` | `tls`, `coqui-sslcontext/pkcs11` | client certificates on PKCS #11 tokens | off |
 | `ureq` | `tls`, `ureq` 3.5, `rustls` | the `ureq` module and `agent()` | off |
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper`, `hyper-util`, `tokio`, `tokio-rustls`, `tower-service` | the `hyper` module: `client()` | off |
-| `reqwest` | `tls`, `reqwest` 0.13 (no TLS backend of its own, `socks`), `rustls`, `tracing` | the `reqwest` module: `client()` | off |
+| `reqwest` | `tls`, `coqui-proxy/relay`, `reqwest` 0.13 (no TLS backend of its own, `socks`), `rustls`, `tracing` | the `reqwest` module: `client()` | off |
 | `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs`, `percent-encoding` | the `session` module | off |
 | `json` | `session`, `serde`, `serde_json` | `Response::json`, `FetchBuilder::json` | off |
 | `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` | off |
@@ -124,6 +124,7 @@ impl Builder {
     pub fn tls_config(self, config: Arc<rustls::ClientConfig>) -> Self;  // default coqui_sslcontext::client_config()
     pub fn connector(self, connector: ProxyConnector) -> Self;
     pub fn failover(self, bool) -> Self; pub fn bad_proxy_ttl(self, Duration) -> Self; pub fn adapter_settings(self, AdapterSettings) -> Self;
+    pub fn relay_settings(self, RelaySettings) -> Self;                   // the relay's bounds (failover on)
     pub fn configure(self, f: impl FnOnce(reqwest::ClientBuilder) -> reqwest::ClientBuilder + Send + 'static) -> Self;
     pub fn client_builder(self) -> Result<reqwest::ClientBuilder, Error>;  // proxy and TLS set; add more, then build
     pub fn build(self) -> Result<reqwest::Client, Error>;
@@ -132,14 +133,28 @@ impl Builder {
 }
 ```
 
-`reqwest` makes its own connections: its TLS is `use_preconfigured_tls` (the system's verification, no host
-name, so no per-host certificate memory) and its proxy for each connection is `Proxy::custom` answering the
-first usable route of the resolver for that URL (HTTP, HTTPS, SOCKS 5 with the proxy resolving the name).
-SOCKS 4/4a, gateways and proxies with extra headers are skipped to the next route; when none is usable the
-request fails (it never goes direct past the proxy the system asked for). `reqwest`'s connector layer is
-sealed (`Conn` and `Unnameable` cannot be named, a request cannot be offered to it twice), so a route that
-fails to connect fails the request: `failover` and `bad_proxy_ttl` are accepted for symmetry and listed by
-`not_applied()`. Negotiate and NTLM proxy login is likewise not available.
+`reqwest` makes its own connections and cannot retry a route (its connector layer is sealed), so its TLS is
+`use_preconfigured_tls` (the system's verification, no host name, so no per-host certificate memory) and its
+proxy is one of two things:
+
+- **`failover` on (default): a relay.** `client_builder()` and `build()` start a `coqui_proxy::relay::Relay`
+  (a loopback HTTP proxy on the caller's Tokio runtime, listening on `127.0.0.1` with a random port and a
+  random per-relay credential) over the builder's `connector` (made asynchronous, with `failover` and
+  `bad_proxy_ttl`) and `resolver`, and give `reqwest` that one proxy through `Proxy::custom(..).headers(..)`
+  carrying the relay's token header (not `Proxy-Authorization`: `reqwest` drops that on a redirect to another
+  host and the second hop would get `407`). Every request, `https:` (`CONNECT`) or `http:` (absolute form), therefore
+  gets the connector's failover and failed-proxy memory, PAC, rules, SOCKS 4/4a/5, Negotiate and NTLM login,
+  proxy TLS and reply limits, and a direct route is dialled by the relay. **The relay lives exactly as long as
+  the client and all its clones** (the proxy closure `reqwest` keeps owns the `RelayHandle`); the builder may
+  be dropped. Building **needs a Tokio runtime** (`Error::Proxy(Io)` otherwise); `relay_settings` sets the
+  bounds (connections, head time and size, idle time; the address must be loopback, else `Error::Proxy`).
+  `not_applied()` then lists only per-host certificate memory, the session client's own features, URL-prefix
+  gateways (skipped to the next route) and `Upgrade` requests over plain `http:`.
+- **`failover(false)`: `Proxy::custom`** answering the first usable route of the resolver for each URL (HTTP,
+  HTTPS, SOCKS 5 with the proxy resolving the name); SOCKS 4/4a, gateways and proxies with extra headers are
+  skipped to the next route and, when none is usable, the request fails (it never goes direct past the proxy
+  the system asked for). A route that fails to connect fails the request; Negotiate and NTLM proxy login and
+  the connector's reply limits are not available, and `not_applied()` says so. No runtime is needed.
 
 ## Errors
 

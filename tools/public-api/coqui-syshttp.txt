@@ -85,6 +85,7 @@ pub fn coqui_syshttp::reqwest::Builder::failover(self, bool) -> Self
 pub fn coqui_syshttp::reqwest::Builder::new() -> Self
 pub fn coqui_syshttp::reqwest::Builder::non_defaults(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn coqui_syshttp::reqwest::Builder::not_applied(&self) -> alloc::vec::Vec<&'static str>
+pub fn coqui_syshttp::reqwest::Builder::relay_settings(self, coqui_proxy::settings::RelaySettings) -> Self
 pub fn coqui_syshttp::reqwest::Builder::resolver(self, coqui_proxy::resolver::Resolver) -> Self
 pub fn coqui_syshttp::reqwest::Builder::tls_config(self, alloc::sync::Arc<rustls::client::client_conn::ClientConfig>) -> Self
 impl core::default::Default for coqui_syshttp::reqwest::Builder

@@ -23,7 +23,8 @@ at the paths it has always had and adds the HTTP client that uses them. Full API
   `ProxyConnector`, `OriginAuth`, ... from coqui-proxy at the root, `auth`, `system` and `pac`
   as modules, and coqui-sslcontext as `tls`.
 - **Three HTTP stacks**: the same system proxy, proxy login and TLS for `ureq` (blocking), `hyper-util`
-  (`hyper::client()`) and `reqwest` (`reqwest::client()`), with the same failover settings.
+  (`hyper::client()`) and `reqwest` (`reqwest::client()`), with the same failover settings. `reqwest`
+  cannot retry a route, so its failover runs through an in-process loopback relay (Tokio runtime needed).
 - **Origin login**: `ureq::OriginAgent` answers a server's `401` with Basic, Negotiate or NTLM
   for the hosts a policy names.
 - **Sessions**: `session::Client` owns redirects, cookies, tokens, hooks, retries and a deadline above
@@ -48,7 +49,7 @@ feature:
 | `pkcs11` | `tls`, `coqui-sslcontext/pkcs11` | client certificates on smart cards and tokens |
 | `ureq` | `tls`, `ureq` 3 | the `ureq` module and `agent()` |
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper-util`, `tokio-rustls` | the `hyper` module and `hyper::client()` |
-| `reqwest` | `tls`, `reqwest` 0.13 | the `reqwest` module and `reqwest::client()` |
+| `reqwest` | `tls`, `coqui-proxy/relay`, `reqwest` 0.13 | the `reqwest` module and `reqwest::client()` |
 | `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs` | the `session` module |
 | `json` | `session`, `serde_json` | JSON bodies and replies of the session layer |
 | `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` |

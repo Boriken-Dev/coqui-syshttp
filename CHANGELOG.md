@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `reqwest` failover: with `failover` on (the default) the builder starts a `coqui_proxy::relay` on the
+  caller's Tokio runtime and gives `reqwest` that loopback proxy and its random credential as its only proxy, so
+  `failover`, `bad_proxy_ttl`, SOCKS 4, Negotiate and NTLM login and the connector's reply limits apply; the relay
+  lives as long as the client and its clones. `reqwest::Builder::relay_settings`. `failover(false)` keeps the
+  `Proxy::custom` path.
 - `hyper` and `reqwest` modules (features of the same names): a `hyper-util` client and a `reqwest` client
   that follow the system's proxy, proxy login and TLS; `AdapterSettings` (`failover`, `bad_proxy_ttl`) on the
   three adapters' builders, `ureq::AgentBuilder::{failover, bad_proxy_ttl}`.
