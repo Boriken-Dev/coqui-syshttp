@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   serves the scheme's default port, `host:port` another one). `TokenSettings::{plain_http, any_port}` and
   `ClientBuilder::{token_plain_http, token_any_port}` lift either rule and are listed by
   `SessionSettings::non_defaults()`.
+- A `reqwest` or `reqwest::blocking` client with `failover(false)` fails a request whose proxy lookup fails (an
+  erroring PAC, a malformed proxy setting) instead of sending it direct.
 
 ### Added
 

@@ -316,8 +316,9 @@ pub(crate) fn system_proxy(resolver: Resolver) -> ReqwestProxy {
         let routes = match resolver.lookup(url.as_str()) {
             Ok(routes) => routes,
             Err(error) => {
-                tracing::warn!(target: "coqui_syshttp", %error, "no route for a request; it goes direct");
-                return None;
+                // reqwest reads `None` as "no proxy": a failed lookup must not send the request direct.
+                tracing::warn!(target: "coqui_syshttp", %error, "no route for a request; the request fails");
+                return Url::parse(UNUSABLE).ok();
             }
         };
         let mut refused = Vec::new();

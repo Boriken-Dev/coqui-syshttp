@@ -156,7 +156,7 @@ proxy is one of two things:
   gateways (skipped to the next route) and `Upgrade` requests over plain `http:`.
 - **`failover(false)`: `Proxy::custom`** answering the first usable route of the resolver for each URL (HTTP,
   HTTPS, SOCKS 5 with the proxy resolving the name); SOCKS 4/4a, gateways and proxies with extra headers are
-  skipped to the next route and, when none is usable, the request fails (it never goes direct past the proxy
+  skipped to the next route and, when none is usable or the lookup itself fails (a PAC error, a malformed proxy setting), the request fails (it never goes direct past the proxy
   the system asked for). A route that fails to connect fails the request; Negotiate and NTLM proxy login and
   the connector's reply limits are not available, and `not_applied()` says so. No runtime is needed.
 

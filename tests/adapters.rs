@@ -39,6 +39,31 @@ fn resolver(variable: &str, value: String) -> Resolver {
         .build()
 }
 
+/// A resolver whose only source fails, with the loopback bypass off so that the lookup reaches
+/// it for a loopback origin.
+#[cfg(feature = "reqwest")]
+fn failing_resolver() -> Resolver {
+    #[derive(Debug)]
+    struct Failing;
+    impl coqui_syshttp::proxy::ProxySource for Failing {
+        fn routes(
+            &self,
+            _url: &str,
+        ) -> Result<Option<Vec<coqui_syshttp::Route>>, coqui_syshttp::proxy::Error> {
+            Err(coqui_syshttp::proxy::Error::NoReachableProxy)
+        }
+    }
+    Resolver::builder()
+        .environment(Environment::from_pairs([("X", "y")]))
+        .system(false)
+        .no_proxy(coqui_syshttp::BypassRules::parse(
+            "<-loopback>",
+            coqui_syshttp::Dialect::NoProxy,
+        ))
+        .source(Failing)
+        .build()
+}
+
 /// A server wanting a certificate from the corp CA, and the `Tls` that trusts it and holds one.
 #[cfg(any(feature = "ureq", feature = "hyper"))]
 struct Origin {
@@ -289,6 +314,25 @@ mod reqwest_client {
                 .is_err()
         );
         assert!(server.presented().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_lookup_that_fails_fails_the_request_instead_of_going_direct() {
+        let origin = StandInOrigin::start("direct");
+        let (_, config) = plain_origin();
+        let client = coqui_syshttp::reqwest::builder()
+            .failover(false)
+            .resolver(failing_resolver())
+            .tls_config(config)
+            .build()
+            .unwrap();
+        assert!(
+            client
+                .get(format!("http://127.0.0.1:{}/", origin.addr.port()))
+                .send()
+                .await
+                .is_err()
+        );
     }
 
     /// A closed port, then a live proxy.
@@ -619,6 +663,24 @@ mod reqwest_blocking {
         );
         drop(clone);
         assert!(refuses(address), "the relay outlived its client");
+    }
+
+    #[test]
+    fn a_lookup_that_fails_fails_the_request_instead_of_going_direct() {
+        let origin = StandInOrigin::start("direct");
+        let (_, config) = plain_origin();
+        let client = coqui_syshttp::reqwest::blocking::builder()
+            .failover(false)
+            .resolver(failing_resolver())
+            .tls_config(config)
+            .build()
+            .unwrap();
+        assert!(
+            client
+                .get(format!("http://127.0.0.1:{}/", origin.addr.port()))
+                .send()
+                .is_err()
+        );
     }
 
     #[test]
