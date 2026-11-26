@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   replacing it with a default one, so the connector's reply limits, timeout, user agent and login policy hold.
 - `reqwest::Builder::configure` and its blocking twin run before the proxy and TLS configuration are set, as their doc
   says, so a closure that calls `no_proxy()` or `proxy(..)` can no longer take the relay out of the request's path.
+- The bounds that were constants are settings with the same values: `SessionSettings::drain_bytes` (64 KiB, the
+  redirect body read to keep a connection), `FileJarBuilder::file_retries` (10 tries, 10 ms) with
+  `cookies::{load_netscape_with, save_netscape_with}` and `jar::FileRetry`, and `UreqTransportBuilder::peer_text_limit`.
+  The cut of a redirect target and of a transport error's text in a message follows `peer_text_limit` (120) instead
+  of a fixed 200.
 
 ### Added
 

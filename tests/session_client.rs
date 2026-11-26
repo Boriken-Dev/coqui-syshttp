@@ -1353,3 +1353,77 @@ fn the_builder_and_the_client_list_what_they_loosen() {
     assert!(has(&lines, "trust"), "{lines:?}");
     assert!(has(&lines, "plain http"), "{lines:?}");
 }
+
+#[test]
+fn the_redirect_body_a_client_drains_is_a_setting() {
+    let reused = |drain: Option<usize>| {
+        let server = Server::start(|req: &Req| {
+            if req.target == "/a" {
+                Reply::redirect(302, "/b").body(vec![b'x'; 32])
+            } else {
+                Reply::ok("done")
+            }
+        });
+        let mut settings = coqui_syshttp::session::SessionSettings::default();
+        if let Some(drain) = drain {
+            settings.drain_bytes = drain;
+        }
+        let client = Client::builder()
+            .env(quiet(&[]))
+            .settings(settings)
+            .build()
+            .unwrap();
+        let mut response = client
+            .request(Method::GET, server.url("/a"))
+            .send()
+            .unwrap();
+        assert_eq!(response.text().unwrap(), "done");
+        server.connections()
+    };
+    assert_eq!(
+        reused(None),
+        1,
+        "a short body is drained and the connection reused"
+    );
+    assert_eq!(
+        reused(Some(16)),
+        2,
+        "a body past drain_bytes is abandoned with its connection"
+    );
+    let mut settings = coqui_syshttp::session::SessionSettings::default();
+    assert!(settings.non_defaults().is_empty());
+    settings.drain_bytes *= 2;
+    assert!(
+        settings
+            .non_defaults()
+            .iter()
+            .any(|line| line.contains("drain_bytes"))
+    );
+}
+
+#[test]
+fn a_refused_redirect_shows_its_target_cut_to_the_peer_text_limit() {
+    let long = "p".repeat(150);
+    let server = Server::start({
+        let long = long.clone();
+        move |_| Reply::redirect(302, &format!("/{long}"))
+    });
+    let message = |limit: usize| {
+        let mut settings = coqui_syshttp::session::SessionSettings::default();
+        settings.peer_text_limit = limit;
+        Client::builder()
+            .env(quiet(&[]))
+            .settings(settings)
+            .build()
+            .unwrap()
+            .request(Method::POST, server.url("/"))
+            .body("x")
+            .send()
+            .unwrap_err()
+            .to_string()
+    };
+    let wide = message(400);
+    assert!(wide.contains(&long), "{wide}");
+    let narrow = message(20);
+    assert!(!narrow.contains(&"p".repeat(30)), "{narrow}");
+}

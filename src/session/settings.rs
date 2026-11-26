@@ -236,6 +236,10 @@ pub struct SessionSettings {
     pub system_proxy_max_age: Duration,
     /// Most characters of text from the peer that a message shows (120).
     pub peer_text_limit: usize,
+    /// Most bytes of a redirect's body read to keep its connection for the next request (64
+    /// KiB); a longer body is abandoned with the connection. Raising it makes a client read more
+    /// of a body it does not want.
+    pub drain_bytes: usize,
 }
 
 impl SessionSettings {
@@ -264,6 +268,10 @@ impl SessionSettings {
         }
         if self.max_redirects > defaults.max_redirects {
             loose.push("max_redirects above the default".to_string());
+        }
+        if self.drain_bytes > defaults.drain_bytes {
+            loose
+                .push("drain_bytes above the default: more of a redirect body is read".to_string());
         }
         if self.cookies.max_per_host > defaults.cookies.max_per_host
             || self.cookies.max_bytes > defaults.cookies.max_bytes
@@ -305,6 +313,7 @@ impl Default for SessionSettings {
             tls_max_age: Duration::from_secs(60),
             system_proxy_max_age: Duration::from_secs(60),
             peer_text_limit: 120,
+            drain_bytes: 64 * 1024,
         }
     }
 }

@@ -253,13 +253,15 @@ retries is returned. `gzip` and `deflate` are decoded unless the caller set `Acc
 PUT DELETE TRACE PROPFIND}, `max_reply_bytes` 8 MiB, `decode_chunk` 256 KiB, `max_interim_replies` 8, `pool` {`max_idle` 8,
 `max_idle_per_route` 1, `reuse_window` 1 s, `idle_timeout` 15 s}, `cookies` {`store` `Memory`|`PerHost`|`Key`|`Jar`, `hosts`,
 `max_age` 400 d, `max_per_host` 180, `max_bytes` 4096, `public_suffixes` none, `public_suffix_list` true}, `tokens` {`store` `None`|`PerHost`|`Key`|`Jar`, `plain_http` false, `any_port` false}, `tls_max_age` 60 s,
-`system_proxy_max_age` 60 s, `peer_text_limit` 120.
+`system_proxy_max_age` 60 s, `peer_text_limit` 120, `drain_bytes` 64 KiB (most of a redirect's body read to keep its
+connection; more is abandoned with it). `UreqTransportBuilder::peer_text_limit(usize)` (also from `settings(..)`).
 
 Sub-modules: `session::env` (`HttpEnv::{process, builder, prefixes, name, find, get, family, environment,
 system_proxy_enabled, proxy_auth_header, proxy_type, configured_proxy, check_proxy_settings, resolver(ProxyOverrides),
 resolver_with}` and the setting-name constants), `session::cookies` (`Cookie`, `CookieLike`, `HostAliases`,
-`parse_set_cookie`, `SetCookieContext` (`public_suffixes(..)`, `public_suffix_list(bool)`), `domain_covers`, `load_netscape`, `save_netscape`), `session::jar`
-(`CookieJar`, `TokenJar`, `MemoryCookieJar`, `MemoryTokenJar`, `FileCookieJar`, `FileTokenJar`, `store_root`,
+`parse_set_cookie`, `SetCookieContext` (`public_suffixes(..)`, `public_suffix_list(bool)`), `domain_covers`, `load_netscape`, `save_netscape`, `load_netscape_with`, `save_netscape_with` taking a `&FileRetry`), `session::jar`
+(`CookieJar`, `TokenJar`, `MemoryCookieJar`, `MemoryTokenJar`, `FileCookieJar`, `FileTokenJar`, `FileJarBuilder`
+(`root`, `env`, `file_retries(tries, wait)`: 10 tries, 10 ms, for a file another handle holds), `FileRetry`, `store_root`,
 `default_root`, `safe_name`, `HOME`), `session::hooks` (`Hook`, `HookKind`, `from_env`, `matching`, `skipped`,
 `split_command`, `curl_command`, `wrapper_environment`, the `SYSHTTP_HOOK*` constants).
 

@@ -112,6 +112,7 @@ pub struct UreqTransportBuilder {
     decode_chunk: usize,
     origin_auth: Option<OriginAuth>,
     system_proxy_max_age: Duration,
+    peer_text_limit: usize,
 }
 
 impl Default for UreqTransportBuilder {
@@ -130,6 +131,7 @@ impl Default for UreqTransportBuilder {
             decode_chunk: settings.decode_chunk,
             origin_auth: None,
             system_proxy_max_age: settings.system_proxy_max_age,
+            peer_text_limit: settings.peer_text_limit,
         }
     }
 }
@@ -226,6 +228,13 @@ impl UreqTransportBuilder {
         self.max_reply_bytes = settings.max_reply_bytes;
         self.decode_chunk = settings.decode_chunk;
         self.system_proxy_max_age = settings.system_proxy_max_age;
+        self.peer_text_limit = settings.peer_text_limit;
+        self
+    }
+
+    /// Most characters of text from the peer that an error message shows (120).
+    pub fn peer_text_limit(mut self, limit: usize) -> Self {
+        self.peer_text_limit = limit;
         self
     }
 
@@ -293,6 +302,7 @@ impl UreqTransportBuilder {
             max_reply_bytes: self.max_reply_bytes,
             decode_chunk: self.decode_chunk,
             origin_auth: self.origin_auth,
+            peer_text_limit: self.peer_text_limit,
             cache: Mutex::new(None),
         };
         // The verifier is started now, so a setting that cannot be used is refused now.
@@ -328,6 +338,7 @@ struct Inner {
     max_reply_bytes: usize,
     decode_chunk: usize,
     origin_auth: Option<OriginAuth>,
+    peer_text_limit: usize,
     cache: Mutex<Option<Agents>>,
 }
 
@@ -460,7 +471,7 @@ fn is_repeatable(method: &Method) -> bool {
     )
 }
 
-fn map_error(error: ureq::Error) -> Error {
+fn map_error(error: ureq::Error, limit: usize) -> Error {
     match error {
         ureq::Error::Timeout(_) => Error::Timeout("the request timed out".to_string()),
         ureq::Error::Io(error)
@@ -478,14 +489,14 @@ fn map_error(error: ureq::Error) -> Error {
         )),
         ureq::Error::ConnectProxyFailed(reason) => Error::Io(io::Error::new(
             io::ErrorKind::ConnectionRefused,
-            peer_text(&reason, 200),
+            peer_text(&reason, limit),
         )),
         ureq::Error::BadUri(_) | ureq::Error::Http(_) => {
             Error::InvalidRequest("the request cannot be sent".to_string())
         }
         other => Error::Io(io::Error::new(
             io::ErrorKind::InvalidData,
-            peer_text(&other.to_string(), 200),
+            peer_text(&other.to_string(), limit),
         )),
     }
 }
@@ -624,7 +635,7 @@ impl Transport for UreqTransport {
                 .build();
             agent.run(request)
         }
-        .map_err(map_error)?;
+        .map_err(|error| map_error(error, inner.peer_text_limit))?;
 
         let (parts, body) = reply.into_parts();
         let mut reply_headers = Headers::new();

@@ -161,3 +161,46 @@ fn an_unreadable_or_missing_file_is_no_entry() {
     let jar = FileTokenJar::new(directory.path());
     assert!(jar.get("nobody.test").is_none());
 }
+
+/// A path `fs::read` refuses with `PermissionDenied` however often it is tried.
+fn unreadable(directory: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let path = directory.join(name);
+    #[cfg(windows)]
+    std::fs::create_dir_all(&path).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(&path, "token\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    }
+    path
+}
+
+#[test]
+#[cfg(any(windows, unix))]
+fn the_file_retries_are_settings_of_the_jar_builder() {
+    use std::time::{Duration, Instant};
+    let directory = tempfile::tempdir().unwrap();
+    let tokens = directory.path().join("tokens");
+    std::fs::create_dir_all(&tokens).unwrap();
+    let path = unreadable(&tokens, "retry.example.token");
+    #[cfg(unix)]
+    if std::fs::read(&path).is_ok() {
+        return; // the superuser reads a file whatever its mode
+    }
+    let _ = &path;
+    let timed = |tries: u32| {
+        let jar = FileTokenJar::builder()
+            .root(directory.path())
+            .file_retries(tries, Duration::from_millis(60))
+            .build_tokens();
+        let started = Instant::now();
+        assert!(jar.get("retry.example").is_none());
+        started.elapsed()
+    };
+    assert!(timed(1) < Duration::from_millis(150));
+    assert!(
+        timed(6) >= Duration::from_millis(250),
+        "five waits of 60 ms between six tries"
+    );
+}

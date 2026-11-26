@@ -755,7 +755,7 @@ impl Client {
     }
 
     fn drain(&self, response: Response) {
-        response.discard(Some(64 * 1024));
+        response.discard(Some(self.inner.settings.drain_bytes));
     }
 
     /// A request that carries no body, following its redirects up to `max_redirects`.

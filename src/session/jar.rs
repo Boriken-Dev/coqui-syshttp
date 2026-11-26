@@ -20,8 +20,9 @@ use std::sync::Mutex;
 
 use coqui_proxy::Secret;
 
-use super::cookies::{Cookie, load_netscape, save_netscape};
+use super::cookies::{Cookie, load_netscape_with, save_netscape_with};
 use super::env::HttpEnv;
+pub use super::fileio::FileRetry;
 use super::fileio::{read_text, write_private};
 #[cfg(feature = "session-reqwest")]
 use super::settings::CookieSettings;
@@ -207,6 +208,7 @@ impl TokenJar for MemoryTokenJar {
 pub struct FileJarBuilder {
     root: Option<PathBuf>,
     env: Option<HttpEnv>,
+    retry: FileRetry,
 }
 
 impl FileJarBuilder {
@@ -219,6 +221,13 @@ impl FileJarBuilder {
     /// Where `SYSHTTP_HOME` is read from (default: the process, through `SYSHTTP_PREFIX`).
     pub fn env(mut self, env: HttpEnv) -> Self {
         self.env = Some(env);
+        self
+    }
+
+    /// How often a read or a replace is tried again when another handle holds the file, and how
+    /// long each wait is (10 tries, 10 ms).
+    pub fn file_retries(mut self, tries: u32, wait: core::time::Duration) -> Self {
+        self.retry = FileRetry::new(tries, wait);
         self
     }
 
@@ -235,6 +244,7 @@ impl FileJarBuilder {
     pub fn build_cookies(self) -> FileCookieJar {
         FileCookieJar {
             dir: self.root_dir().join("cookies"),
+            retry: self.retry,
             engine: Engine::default(),
         }
     }
@@ -244,6 +254,7 @@ impl FileJarBuilder {
     pub fn build_tokens(self) -> FileTokenJar {
         FileTokenJar {
             dir: self.root_dir().join("tokens"),
+            retry: self.retry,
         }
     }
 }
@@ -252,6 +263,7 @@ impl FileJarBuilder {
 #[derive(Debug, Clone)]
 pub struct FileCookieJar {
     dir: PathBuf,
+    retry: FileRetry,
     #[cfg_attr(not(feature = "session-reqwest"), allow(dead_code))]
     engine: Engine,
 }
@@ -267,6 +279,7 @@ impl FileCookieJar {
     pub fn new(root: impl AsRef<Path>) -> Self {
         Self {
             dir: root.as_ref().join("cookies"),
+            retry: FileRetry::default(),
             engine: Engine::default(),
         }
     }
@@ -281,11 +294,12 @@ impl FileCookieJar {
 impl CookieJar for FileCookieJar {
     fn get(&self, key: &str) -> Option<Vec<Cookie>> {
         let path = self.path(key);
-        path.exists().then(|| load_netscape(&path))
+        path.exists()
+            .then(|| load_netscape_with(&path, &self.retry))
     }
 
     fn set(&self, key: &str, cookies: &[Cookie]) -> io::Result<()> {
-        save_netscape(cookies, &self.path(key))
+        save_netscape_with(cookies, &self.path(key), &self.retry)
     }
 }
 
@@ -293,6 +307,7 @@ impl CookieJar for FileCookieJar {
 #[derive(Debug, Clone)]
 pub struct FileTokenJar {
     dir: PathBuf,
+    retry: FileRetry,
 }
 
 impl FileTokenJar {
@@ -306,6 +321,7 @@ impl FileTokenJar {
     pub fn new(root: impl AsRef<Path>) -> Self {
         Self {
             dir: root.as_ref().join("tokens"),
+            retry: FileRetry::default(),
         }
     }
 
@@ -318,7 +334,7 @@ impl FileTokenJar {
 
 impl TokenJar for FileTokenJar {
     fn get(&self, key: &str) -> Option<Secret> {
-        let text = read_text(&self.path(key)).ok()?;
+        let text = read_text(&self.path(key), &self.retry).ok()?;
         let token = text.trim();
         (!token.is_empty()).then(|| Secret::new(token))
     }
@@ -327,6 +343,7 @@ impl TokenJar for FileTokenJar {
         write_private(
             &self.path(key),
             alloc::format!("{}\n", token.expose().trim()).as_bytes(),
+            &self.retry,
         )
     }
 }
@@ -383,6 +400,7 @@ mod reqwest_store {
             let backing = || -> Arc<dyn CookieJar> {
                 Arc::new(Self {
                     dir: self.dir.clone(),
+                    retry: self.retry,
                     engine: Engine::default(),
                 })
             };
@@ -393,6 +411,7 @@ mod reqwest_store {
             let backing = || -> Arc<dyn CookieJar> {
                 Arc::new(Self {
                     dir: self.dir.clone(),
+                    retry: self.retry,
                     engine: Engine::default(),
                 })
             };

@@ -19,7 +19,7 @@ use coqui_proxy::Secret;
 use url::Url;
 
 pub use aliases::HostAliases;
-pub use netscape::{load_netscape, save_netscape};
+pub use netscape::{load_netscape, load_netscape_with, save_netscape, save_netscape_with};
 pub use parse::{SetCookieContext, parse_set_cookie};
 
 /// A Netscape cookie file marks an HttpOnly cookie by prefixing its domain with this.
