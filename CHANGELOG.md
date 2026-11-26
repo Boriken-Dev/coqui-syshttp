@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   connector (a raw `rustls::ClientConfig` cannot be inspected).
 - `UreqTransportBuilder::proxy_tls` beside `connector` adds the TLS configuration to the given connector instead of
   replacing it with a default one, so the connector's reply limits, timeout, user agent and login policy hold.
+- `reqwest::Builder::configure` and its blocking twin run before the proxy and TLS configuration are set, as their doc
+  says, so a closure that calls `no_proxy()` or `proxy(..)` can no longer take the relay out of the request's path.
 
 ### Added
 

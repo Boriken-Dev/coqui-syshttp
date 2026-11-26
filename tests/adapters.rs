@@ -428,6 +428,26 @@ mod reqwest_client {
     }
 
     #[tokio::test]
+    async fn configure_cannot_take_the_relay_out_of_the_way() {
+        let (_, config) = plain_origin();
+        let origin = StandInOrigin::start("plain http");
+        let proxy = StandInProxy::start(Require::Basic("ada", "s3cret"), origin.addr);
+        let client = coqui_syshttp::reqwest::builder()
+            .resolver(resolver("ALL_PROXY", dead_then(proxy.addr)))
+            .tls_config(config)
+            .configure(|builder| builder.no_proxy())
+            .build()
+            .unwrap();
+        assert_eq!(
+            text(&client, "http://app.internal.test/data")
+                .await
+                .unwrap(),
+            "plain http"
+        );
+        assert_eq!(proxy.seen().len(), 1);
+    }
+
+    #[tokio::test]
     async fn without_failover_the_same_fetch_fails_as_before() {
         let (server, config) = plain_origin();
         let secure = StandInProxy::start(Require::Basic("ada", "s3cret"), server.addr);
@@ -644,6 +664,24 @@ mod reqwest_blocking {
             seen.request_line == "CONNECT app.internal.test:80 HTTP/1.1"
                 && seen.header("proxy-authorization") == Some("Basic YWRhOnMzY3JldA==")
         }));
+    }
+
+    #[test]
+    fn configure_cannot_take_the_relay_out_of_the_way() {
+        let (_, config) = plain_origin();
+        let origin = StandInOrigin::start("plain http");
+        let proxy = StandInProxy::start(Require::Basic("ada", "s3cret"), origin.addr);
+        let client = coqui_syshttp::reqwest::blocking::builder()
+            .resolver(resolver("ALL_PROXY", dead_then(proxy.addr)))
+            .tls_config(config)
+            .configure(|builder| builder.no_proxy())
+            .build()
+            .unwrap();
+        assert_eq!(
+            text(&client, "http://app.internal.test/data").unwrap(),
+            "plain http"
+        );
+        assert_eq!(proxy.seen().len(), 1);
     }
 
     #[test]

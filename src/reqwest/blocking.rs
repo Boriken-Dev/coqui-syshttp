@@ -183,13 +183,14 @@ impl Builder {
         } else {
             system_proxy(resolver)
         };
-        let mut builder = ClientBuilder::new()
-            .use_preconfigured_tls((*config).clone())
-            .proxy(proxy);
+        // The closures run first, so the proxy and the TLS configuration are the last word.
+        let mut builder = ClientBuilder::new();
         for configure in self.configure {
             builder = configure(builder);
         }
-        Ok(builder)
+        Ok(builder
+            .use_preconfigured_tls((*config).clone())
+            .proxy(proxy))
     }
 
     /// The client.
