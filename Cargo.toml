@@ -55,8 +55,8 @@ json = ["session", "dep:serde", "dep:serde_json"]
 session-reqwest = ["session", "reqwest", "reqwest/cookies"]
 
 [dependencies]
-coqui-proxy = { git = "https://github.com/Boriken-Dev/coqui-proxy", rev = "e66b9ce26b9f0d2dc18f2262ec015742b2fe4829" }
-coqui-sslcontext = { git = "https://github.com/Boriken-Dev/coqui-sslcontext", rev = "955cd9a455a288a523418daad7e846008c2bf291", optional = true }
+coqui-proxy = { git = "https://github.com/Boriken-Dev/coqui-proxy", rev = "d96239125f6d3a27bbeddf2c04de5a31be1e89fa" }
+coqui-sslcontext = { git = "https://github.com/Boriken-Dev/coqui-sslcontext", rev = "a271e69f82b5fe3a4535d3e6b7e96b7232487e81", optional = true }
 # Error boilerplate.
 thiserror = "2"
 # Why a request cannot be routed as asked (feature `reqwest`).
