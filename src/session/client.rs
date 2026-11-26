@@ -272,6 +272,21 @@ impl ClientBuilder {
         self
     }
 
+    /// Whether a token may be sent over plain `http:` to a host that is not loopback (default:
+    /// no; weaker, and listed by the settings' `non_defaults()`).
+    pub fn token_plain_http(mut self, allow: bool) -> Self {
+        self.settings.tokens.plain_http = allow;
+        self
+    }
+
+    /// Whether a token kept for a host is sent to every port of it (default: only the scheme's
+    /// default port, and a `host:port` entry for another; weaker, and listed by the settings'
+    /// `non_defaults()`).
+    pub fn token_any_port(mut self, allow: bool) -> Self {
+        self.settings.tokens.any_port = allow;
+        self
+    }
+
     /// Groups of hosts that share cookies (default: `SYSHTTP_COOKIE_HOSTS`).
     pub fn cookie_hosts<G, H>(mut self, groups: impl IntoIterator<Item = G>) -> Self
     where
@@ -401,12 +416,18 @@ impl ClientBuilder {
             TokenStore::PerHost => Some(Tokens::new(
                 Arc::new(FileTokenJar::builder().env(env.clone()).build_tokens()),
                 JarKey::ByHost,
+                &settings.tokens,
             )),
             TokenStore::Key(name) => Some(Tokens::new(
                 Arc::new(FileTokenJar::builder().env(env.clone()).build_tokens()),
                 JarKey::Named(name.clone()),
+                &settings.tokens,
             )),
-            TokenStore::Jar(jar) => Some(Tokens::new(Arc::clone(jar), JarKey::ByHost)),
+            TokenStore::Jar(jar) => Some(Tokens::new(
+                Arc::clone(jar),
+                JarKey::ByHost,
+                &settings.tokens,
+            )),
         };
         let cookies = Cookies::new(jar, key, aliases, settings.cookies.clone());
         Ok(Client {

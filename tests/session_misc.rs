@@ -432,7 +432,8 @@ fn reauth_runs_once_after_a_401_or_403_and_sends_again() {
             url: &url::Url,
         ) -> Result<(), coqui_syshttp::session::BoxError> {
             self.1.fetch_add(1, Ordering::SeqCst);
-            self.0.set(url.host_str().unwrap(), &Secret::new("fresh"))?;
+            let key = format!("{}:{}", url.host_str().unwrap(), url.port().unwrap());
+            self.0.set(&key, &Secret::new("fresh"))?;
             Ok(())
         }
     }

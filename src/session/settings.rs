@@ -175,6 +175,13 @@ impl Default for CookieSettings {
 pub struct TokenSettings {
     /// Where tokens are read ([`TokenStore::None`]).
     pub store: TokenStore,
+    /// Whether a token may be sent over plain `http:` to a host that is not loopback (no). A token
+    /// is a long-lived secret that anyone on the path reads from a plain request.
+    pub plain_http: bool,
+    /// Whether a token kept for a host goes to every port of it (no). By default the host's
+    /// entry serves the scheme's default port and `host:port` another one, so a service on
+    /// another port of the host does not receive it.
+    pub any_port: bool,
 }
 
 /// Every setting of a [`Client`](super::Client), with Python syshttp's defaults.
@@ -252,6 +259,12 @@ impl SessionSettings {
             || self.cookies.max_bytes > defaults.cookies.max_bytes
         {
             loose.push("cookie bounds above the defaults".to_string());
+        }
+        if self.tokens.plain_http {
+            loose.push("tokens.plain_http: a token may cross plain http".to_string());
+        }
+        if self.tokens.any_port {
+            loose.push("tokens.any_port: a token goes to any port of its host".to_string());
         }
         loose
     }

@@ -532,6 +532,11 @@ fn cookie_host_groups_share_cookies_across_names() {
     );
 }
 
+/// The jar key of a loopback origin: its host and port.
+fn local_key(server: &Server) -> String {
+    format!("127.0.0.1:{}", server.addr.port())
+}
+
 fn tokens_with(host_key: &str, token: &str) -> Arc<MemoryTokenJar> {
     let jar = Arc::new(MemoryTokenJar::new());
     jar.set(host_key, &Secret::new(token)).unwrap();
@@ -543,13 +548,16 @@ fn a_token_becomes_a_bearer_unless_it_names_a_scheme_and_explicit_auth_beats_it(
     let server = echo();
     let bare = Client::builder()
         .env(quiet(&[]))
-        .tokens(TokenStore::Jar(tokens_with("127.0.0.1", "abc")))
+        .tokens(TokenStore::Jar(tokens_with(&local_key(&server), "abc")))
         .build()
         .unwrap();
     bare.request(Method::GET, server.url("/")).send().unwrap();
     let scheme = Client::builder()
         .env(quiet(&[]))
-        .tokens(TokenStore::Jar(tokens_with("127.0.0.1", "Basic dXNlcg==")))
+        .tokens(TokenStore::Jar(tokens_with(
+            &local_key(&server),
+            "Basic dXNlcg==",
+        )))
         .build()
         .unwrap();
     scheme.request(Method::GET, server.url("/")).send().unwrap();
@@ -584,7 +592,7 @@ fn a_token_with_a_line_break_is_a_configuration_error_naming_the_key_not_the_val
     let client = Client::builder()
         .env(quiet(&[]))
         .tokens(TokenStore::Jar(tokens_with(
-            "127.0.0.1",
+            &local_key(&server),
             "abc\r\nX-Evil: 1",
         )))
         .build()
@@ -611,7 +619,7 @@ fn a_token_follows_no_redirect_to_another_origin() {
     });
     let client = Client::builder()
         .env(quiet(&[]))
-        .tokens(TokenStore::Jar(tokens_with("127.0.0.1", "abc")))
+        .tokens(TokenStore::Jar(tokens_with(&local_key(&home), "abc")))
         .build()
         .unwrap();
     client.request(Method::GET, home.url("/")).send().unwrap();
@@ -625,7 +633,9 @@ fn a_file_token_jar_is_read_by_host() {
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(home.path().join("tokens")).unwrap();
     std::fs::write(
-        home.path().join("tokens").join("127.0.0.1.token"),
+        home.path()
+            .join("tokens")
+            .join(format!("127.0.0.1_{}.token", server.addr.port())),
         "filetoken\n",
     )
     .unwrap();
@@ -1126,4 +1136,119 @@ fn debug_output_names_no_header_value() {
         .unwrap();
     assert!(!format!("{client:?}").contains("topsecret"));
     assert!(!format!("{:?}", client.settings().headers.len()).is_empty());
+}
+
+/// A transport that answers `200` and keeps what it was asked to send, so a test can use hosts
+/// that are not loopback.
+#[derive(Debug, Clone, Default)]
+struct Recorder(Arc<std::sync::Mutex<Vec<Sent>>>);
+
+/// A URL and the `Authorization` it was sent with.
+type Sent = (String, Option<String>);
+
+impl Recorder {
+    fn authorizations(&self) -> Vec<Sent> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl coqui_syshttp::session::Transport for Recorder {
+    fn send(
+        &self,
+        request: coqui_syshttp::session::PreparedRequest,
+        _stream: bool,
+    ) -> Result<coqui_syshttp::session::Response, Error> {
+        self.0.lock().unwrap().push((
+            request.url.to_string(),
+            request.headers.get("authorization"),
+        ));
+        Ok(coqui_syshttp::session::ResponseBuilder::new(200)
+            .url(request.url)
+            .build())
+    }
+
+    fn close(&self) {}
+}
+
+fn token_client(
+    recorder: &Recorder,
+    key: &str,
+    change: impl FnOnce(ClientBuilder) -> ClientBuilder,
+) -> Client {
+    change(
+        Client::builder()
+            .env(quiet(&[]))
+            .transport(recorder.clone())
+            .tokens(TokenStore::Jar(tokens_with(key, "abc"))),
+    )
+    .build()
+    .unwrap()
+}
+
+fn sent_to(recorder: &Recorder, client: &Client, url: &str) -> Option<String> {
+    client.request(Method::GET, url).send().unwrap();
+    recorder.authorizations().pop().unwrap().1
+}
+
+#[test]
+fn a_token_is_sent_over_https_or_to_loopback_and_not_over_plain_http() {
+    let recorder = Recorder::default();
+    let client = token_client(&recorder, "tokens.example", |b| b);
+    assert_eq!(sent_to(&recorder, &client, "http://tokens.example/"), None);
+    assert_eq!(
+        sent_to(&recorder, &client, "https://tokens.example/").as_deref(),
+        Some("Bearer abc")
+    );
+    let local = token_client(&recorder, "localhost", |b| b);
+    assert_eq!(
+        sent_to(&recorder, &local, "http://localhost/").as_deref(),
+        Some("Bearer abc")
+    );
+    let loose = token_client(&recorder, "tokens.example", |b| b.token_plain_http(true));
+    assert_eq!(
+        sent_to(&recorder, &loose, "http://tokens.example/").as_deref(),
+        Some("Bearer abc")
+    );
+    assert_eq!(
+        sent_to(&recorder, &loose, "https://tokens.example/").as_deref(),
+        Some("Bearer abc")
+    );
+    assert!(
+        loose
+            .settings()
+            .non_defaults()
+            .iter()
+            .any(|line| line.contains("plain http"))
+    );
+}
+
+#[test]
+fn a_token_is_scoped_to_the_port_unless_any_port_is_set() {
+    let recorder = Recorder::default();
+    let client = token_client(&recorder, "tokens.example", |b| b);
+    assert_eq!(
+        sent_to(&recorder, &client, "https://tokens.example:8443/"),
+        None
+    );
+    assert_eq!(
+        sent_to(&recorder, &client, "https://tokens.example:443/").as_deref(),
+        Some("Bearer abc")
+    );
+    let pinned = token_client(&recorder, "tokens.example:8443", |b| b);
+    assert_eq!(
+        sent_to(&recorder, &pinned, "https://tokens.example:8443/").as_deref(),
+        Some("Bearer abc")
+    );
+    assert_eq!(sent_to(&recorder, &pinned, "https://tokens.example/"), None);
+    let any = token_client(&recorder, "tokens.example", |b| b.token_any_port(true));
+    assert_eq!(
+        sent_to(&recorder, &any, "https://tokens.example:8443/").as_deref(),
+        Some("Bearer abc")
+    );
+    assert!(
+        any.settings()
+            .non_defaults()
+            .iter()
+            .any(|line| line.contains("any port"))
+    );
 }

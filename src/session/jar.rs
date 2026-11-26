@@ -2,7 +2,8 @@
 //!
 //! The root is [`store_root`]: `SYSHTTP_HOME` (under the prefixes of [`HttpEnv`]), else the
 //! platform's per-user state directory. Cookies go under `<root>/cookies/<host>.txt` (Netscape
-//! format), tokens under `<root>/tokens/<host>.token`: the files Python syshttp reads and writes.
+//! format), tokens under `<root>/tokens/<host>.token` (`<host>_<port>.token` for a port other than the
+//! scheme's default): the files Python syshttp reads and writes.
 //!
 //! Token values are secrets: they are [`Secret`]s and this module never logs or prints them. Files
 //! are written `0600` (directories `0700`) and replaced whole, with LF line ends; a directory is

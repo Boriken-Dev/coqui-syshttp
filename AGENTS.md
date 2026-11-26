@@ -198,6 +198,9 @@ A client with memory above `ureq`, a port of the Python library `syshttp` 0.1.0:
 the same environment variable names (`SYSHTTP_*`, below) and the same file formats, so a Python and a
 Rust program in one environment share them. Secrets (`Secret`): token and cookie values, never in
 `Debug`, `Display`, an error or a log; a token with CR, LF or NUL is `Error::Configuration` naming the key.
+A jar token is sent only over `https:` or to a loopback host (`tokens.plain_http` lifts it) and only to the port it is
+kept for: the jar key is the host for the scheme's default port and `host:port` for another (a file `<host>_<port>.token`);
+`tokens.any_port` sends the host's entry to every port. Both are listed by `SessionSettings::non_defaults()`.
 
 ```rust
 // session::{Client, ClientBuilder, RequestBuilder, HookRequest}
@@ -205,7 +208,7 @@ Client::builder() -> ClientBuilder
 ClientBuilder::{settings(SessionSettings), header(name, Option<value>), user_agent, timeout(connect, read),
     deadline(Option<Duration>), env(HttpEnv), resolver, tls(Tls), proxy_tls(Arc<ClientConfig>), trust(Trust),
     connector, adapter_settings, origin_auth(OriginAuth), transport(impl Transport), cookies(CookieStore),
-    tokens(TokenStore), cookie_hosts(groups), auth_provider(Arc<dyn AuthProvider>),
+    tokens(TokenStore), token_plain_http(bool), token_any_port(bool), cookie_hosts(groups), auth_provider(Arc<dyn AuthProvider>),
     hook(Regex, Fn(&Client, &mut HookRequest) -> Result<Option<Response>, BoxError>), build() -> Result<Client, Error>}
 Client::{request(Method, url) -> RequestBuilder, follow(Method, url, &Response) -> RequestBuilder, settings(), transport(),
     close(), cookies() -> Vec<Cookie>, token_for(&Url)}                 // Clone; clones share state
@@ -242,7 +245,7 @@ retries is returned. `gzip` and `deflate` are decoded unless the caller set `Acc
 `retry` {`count` 3, `backoff` 1 s, `backoff_max` 120 s, `statuses` 408 429 500 502 503 504, `methods` GET HEAD OPTIONS
 PUT DELETE TRACE PROPFIND}, `max_reply_bytes` 8 MiB, `decode_chunk` 256 KiB, `max_interim_replies` 8, `pool` {`max_idle` 8,
 `max_idle_per_route` 1, `reuse_window` 1 s, `idle_timeout` 15 s}, `cookies` {`store` `Memory`|`PerHost`|`Key`|`Jar`, `hosts`,
-`max_age` 400 d, `max_per_host` 180, `max_bytes` 4096}, `tokens.store` `None`|`PerHost`|`Key`|`Jar`, `tls_max_age` 60 s,
+`max_age` 400 d, `max_per_host` 180, `max_bytes` 4096}, `tokens` {`store` `None`|`PerHost`|`Key`|`Jar`, `plain_http` false, `any_port` false}, `tls_max_age` 60 s,
 `system_proxy_max_age` 60 s, `peer_text_limit` 120.
 
 Sub-modules: `session::env` (`HttpEnv::{process, builder, prefixes, name, find, get, family, environment,

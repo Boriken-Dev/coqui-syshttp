@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The `client` module is now `ureq`.
 - `Error` wraps the two crates' errors (`Proxy`, `Tls`) and has an `Http` variant.
 
+### Fixed
+
+- A jar token is sent only over `https:` or to a loopback host, and only to the port it is kept for (the host's entry
+  serves the scheme's default port, `host:port` another one). `TokenSettings::{plain_http, any_port}` and
+  `ClientBuilder::{token_plain_http, token_any_port}` lift either rule and are listed by
+  `SessionSettings::non_defaults()`.
+
 ### Added
 
 - `reqwest` failover: with `failover` on (the default) the builder starts a `coqui_proxy::relay` on the
