@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   failover, the trust and `Tls` given, the origin login policy and the connector. The `ureq`, `hyper` and
   `UreqTransport` builders also list the `Tls` and connector they were given, and the `reqwest` builders their
   connector (a raw `rustls::ClientConfig` cannot be inspected).
+- `UreqTransportBuilder::proxy_tls` beside `connector` adds the TLS configuration to the given connector instead of
+  replacing it with a default one, so the connector's reply limits, timeout, user agent and login policy hold.
 
 ### Added
 

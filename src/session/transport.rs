@@ -161,7 +161,9 @@ impl UreqTransportBuilder {
         self
     }
 
-    /// The TLS configuration for an `https:` proxy or gateway (default: the system's).
+    /// The TLS configuration for an `https:` proxy or gateway (default: the system's). Given
+    /// beside [`connector`](Self::connector) it is added to that connector, which keeps its bounds
+    /// and login policy.
     pub fn proxy_tls(mut self, config: Arc<rustls::ClientConfig>) -> Self {
         self.proxy_tls = Some(config);
         self
@@ -277,11 +279,7 @@ impl UreqTransportBuilder {
             .build();
         let mut connector = self.connector.unwrap_or_default();
         if let Some(config) = &self.proxy_tls {
-            connector = ProxyConnector::builder()
-                .proxy_tls(Arc::clone(config))
-                .failover(self.adapter.failover)
-                .bad_proxy_ttl(self.adapter.bad_proxy_ttl)
-                .build();
+            connector = connector.with_proxy_tls(Arc::clone(config));
         }
         let inner = Inner {
             env: self.env,

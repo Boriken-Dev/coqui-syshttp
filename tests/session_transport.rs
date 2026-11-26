@@ -380,3 +380,59 @@ fn a_tls_given_whole_is_inspected_for_what_it_loosens() {
     let lines = UreqTransport::builder().non_defaults();
     assert!(lines.is_empty(), "{lines:?}");
 }
+
+/// A proxy that answers any `CONNECT` with a head of about `padding` bytes, then closes.
+fn long_head_proxy(padding: usize) -> std::net::SocketAddr {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            std::thread::spawn(move || {
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                let reply = format!(
+                    "HTTP/1.1 200 Connection established\r\nX-Padding: {}\r\n\r\n",
+                    "a".repeat(padding)
+                );
+                let _ = stream.write_all(reply.as_bytes());
+            });
+        }
+    });
+    address
+}
+
+#[test]
+fn the_connectors_bounds_survive_a_tls_configuration_for_the_proxy() {
+    let proxy = long_head_proxy(200);
+    let mut settings = coqui_syshttp::proxy::ConnectorSettings::default();
+    settings.max_response_head_bytes = 64;
+    let connector = coqui_syshttp::ProxyConnector::builder()
+        .settings(settings)
+        .build();
+    let config = coqui_syshttp::tls::Tls::builder()
+        .build()
+        .unwrap()
+        .client_config("proxy.example")
+        .unwrap();
+    let transport = UreqTransport::builder()
+        .env(env(&[
+            ("SYSHTTP_PROXY", &format!("http://{proxy}")),
+            ("NO_PROXY", ""),
+        ]))
+        .connector(connector)
+        .proxy_tls(config)
+        .build()
+        .unwrap();
+    let error = transport
+        .send(get("http://app.internal.test/"), false)
+        .unwrap_err();
+    assert!(error.to_string().contains("too long"), "{error}");
+}
