@@ -1,7 +1,7 @@
 {
-  "cargoLockSha256": "9d4b1de72932b3c0b8940d3d599b5f117b11d1fda67d70360fdb90c0a8febeb4",
-  "crates": 330,
+  "cargoLockSha256": "f2c5f57790480cbaa388e6f44d820994cf02238e27e9348c40de56ca2e55ac30",
+  "crates": 331,
   "format": 1,
   "gitSources": 3,
-  "sourceCommit": "4d2c42a9a220036d781d557b6e519bf9390dc5bf"
+  "sourceCommit": "5849c82c8b05ac5a642129d277ce9adf07df83c6"
 }
