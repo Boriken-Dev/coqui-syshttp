@@ -1308,3 +1308,48 @@ fn the_clients_cookie_settings_decide_which_suffix_a_domain_may_name() {
     );
     assert_eq!(kept(|s| s.cookies.public_suffix_list = false), ["a", "b"]);
 }
+
+fn loose_connector() -> coqui_syshttp::ProxyConnector {
+    let negotiate = coqui_syshttp::Negotiate::builder()
+        .plain_http(true)
+        .build()
+        .unwrap();
+    coqui_syshttp::ProxyConnector::builder()
+        .negotiate(negotiate)
+        .build()
+}
+
+#[test]
+fn the_builder_and_the_client_list_what_they_loosen() {
+    use coqui_syshttp::tls::{Tls, Trust};
+    let plain = Client::builder().env(quiet(&[]));
+    assert!(plain.non_defaults().is_empty());
+    assert!(plain.build().unwrap().non_defaults().is_empty());
+
+    let tls = Tls::builder().trust(Trust::Disabled).build().unwrap();
+    let origin_auth = coqui_syshttp::OriginAuth::builder()
+        .plain_http(true)
+        .build()
+        .unwrap();
+    let mut no_failover = coqui_syshttp::AdapterSettings::default();
+    no_failover.failover = false;
+    let loose = || {
+        Client::builder()
+            .env(quiet(&[]))
+            .origin_auth(origin_auth.clone())
+            .connector(loose_connector())
+            .adapter_settings(no_failover)
+    };
+    let has = |lines: &[String], text: &str| lines.iter().any(|line| line.contains(text));
+    let by_tls = loose().tls(tls).non_defaults();
+    assert!(has(&by_tls, "trust"), "{by_tls:?}");
+    assert!(has(&by_tls, "OriginAuth::plain_http"), "{by_tls:?}");
+    assert!(has(&by_tls, "Negotiate::plain_http"), "{by_tls:?}");
+    assert!(has(&by_tls, "failover(false)"), "{by_tls:?}");
+    let by_trust = loose().trust(Trust::Disabled);
+    assert!(has(&by_trust.non_defaults(), "trust"));
+    let client = by_trust.token_plain_http(true).build().unwrap();
+    let lines = client.non_defaults();
+    assert!(has(&lines, "trust"), "{lines:?}");
+    assert!(has(&lines, "plain http"), "{lines:?}");
+}

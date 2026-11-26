@@ -87,7 +87,9 @@ I/O error of kind `PermissionDenied`.
 `AdapterSettings { failover: bool = true, bad_proxy_ttl: Duration = 300 s }` (non_exhaustive, `Default`,
 `non_defaults()`), taken by the builders of all three adapters as `failover(bool)`, `bad_proxy_ttl(Duration)`
 and `adapter_settings(AdapterSettings)`. Failover is only for connecting: once a request is sent, a failure is
-the caller's.
+the caller's. Each builder's `non_defaults()` also lists what the `Tls` (key log, `Trust::Disabled`), the connector
+(`Negotiate::plain_http`) and, in the session layer, the origin login policy it was given loosen; the `reqwest`
+builders take a raw `rustls::ClientConfig` (`tls_config`), which cannot say what it loosens, so it is not inspected.
 
 ## Module `hyper` (feature `hyper`)
 
@@ -213,9 +215,10 @@ ClientBuilder::{settings(SessionSettings), header(name, Option<value>), user_age
     deadline(Option<Duration>), env(HttpEnv), resolver, tls(Tls), proxy_tls(Arc<ClientConfig>), trust(Trust),
     connector, adapter_settings, origin_auth(OriginAuth), transport(impl Transport), cookies(CookieStore),
     tokens(TokenStore), token_plain_http(bool), token_any_port(bool), cookie_hosts(groups), auth_provider(Arc<dyn AuthProvider>),
+    non_defaults() -> Vec<String>,
     hook(Regex, Fn(&Client, &mut HookRequest) -> Result<Option<Response>, BoxError>), build() -> Result<Client, Error>}
 Client::{request(Method, url) -> RequestBuilder, follow(Method, url, &Response) -> RequestBuilder, settings(), transport(),
-    close(), cookies() -> Vec<Cookie>, token_for(&Url)}                 // Clone; clones share state
+    close(), cookies() -> Vec<Cookie>, token_for(&Url), non_defaults() -> Vec<String>}                 // Clone; clones share state
 RequestBuilder::{body(impl Into<Body>), header(name, Option<value>), stream(bool), redirects(bool),
     timeout(connect, read), deadline(Option<Duration>), auth(Auth), send() -> Result<Response, Error>}
 session::fetch(url) -> FetchBuilder   // method, header, body, form, json (feature json), timeout, client, transport,

@@ -239,8 +239,18 @@ impl UreqTransportBuilder {
     #[must_use]
     pub fn non_defaults(&self) -> Vec<String> {
         let mut loose = self.adapter.non_defaults();
-        if matches!(self.tls, TlsChoice::Trust(Trust::Disabled)) {
-            loose.push("trust(Disabled): certificates are not verified".to_string());
+        match &self.tls {
+            TlsChoice::Trust(Trust::Disabled) => {
+                loose.push("trust(Disabled): certificates are not verified".to_string());
+            }
+            TlsChoice::Fixed(tls) => loose.extend(crate::adapter::tls_non_defaults(tls)),
+            _ => {}
+        }
+        if let Some(connector) = &self.connector {
+            loose.extend(connector.non_defaults());
+        }
+        if let Some(auth) = &self.origin_auth {
+            loose.extend(auth.non_defaults());
         }
         loose
     }

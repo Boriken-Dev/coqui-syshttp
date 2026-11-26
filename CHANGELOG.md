@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   with `session`) joins the registry heuristic. `CookieSettings::{public_suffixes, public_suffix_list}` add suffixes
   and turn the list off (listed by `SessionSettings::non_defaults()`); `SetCookieContext::{public_suffixes,
   public_suffix_list}`.
+- `session::ClientBuilder::non_defaults()` and `Client::non_defaults()` list what the client loosens: its settings,
+  failover, the trust and `Tls` given, the origin login policy and the connector. The `ureq`, `hyper` and
+  `UreqTransport` builders also list the `Tls` and connector they were given, and the `reqwest` builders their
+  connector (a raw `rustls::ClientConfig` cannot be inspected).
 
 ### Added
 

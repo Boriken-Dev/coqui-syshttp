@@ -355,3 +355,28 @@ fn a_fixed_tls_configuration_is_used_as_given() {
     assert_eq!(transport.send(get(&url), false).unwrap().status(), 200);
     let _ = Arc::new(transport);
 }
+
+#[test]
+fn a_tls_given_whole_is_inspected_for_what_it_loosens() {
+    let tls = coqui_syshttp::tls::Tls::builder()
+        .trust(Trust::Disabled)
+        .build()
+        .unwrap();
+    let lines = UreqTransport::builder().tls(tls).non_defaults();
+    assert!(lines.iter().any(|line| line.contains("trust")), "{lines:?}");
+    let origin_auth = coqui_syshttp::OriginAuth::builder()
+        .plain_http(true)
+        .build()
+        .unwrap();
+    let lines = UreqTransport::builder()
+        .origin_auth(origin_auth)
+        .non_defaults();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("OriginAuth::plain_http")),
+        "{lines:?}"
+    );
+    let lines = UreqTransport::builder().non_defaults();
+    assert!(lines.is_empty(), "{lines:?}");
+}

@@ -39,6 +39,26 @@ fn resolver(variable: &str, value: String) -> Resolver {
         .build()
 }
 
+/// A connector that lets a Negotiate login cross plain http.
+fn loose_connector() -> coqui_syshttp::ProxyConnector {
+    let negotiate = coqui_syshttp::Negotiate::builder()
+        .plain_http(true)
+        .build()
+        .unwrap();
+    coqui_syshttp::ProxyConnector::builder()
+        .negotiate(negotiate)
+        .build()
+}
+
+fn mentions(lines: &[String], text: &str) -> bool {
+    lines.iter().any(|line| line.contains(text))
+}
+
+#[cfg(any(feature = "ureq", feature = "hyper"))]
+fn unverified() -> Tls {
+    Tls::builder().trust(Trust::Disabled).build().unwrap()
+}
+
 /// A resolver whose only source fails, with the loopback bypass off so that the lookup reaches
 /// it for a loopback origin.
 #[cfg(feature = "reqwest")]
@@ -98,6 +118,16 @@ fn origin() -> Origin {
 #[cfg(feature = "hyper")]
 mod hyper_client {
     use super::*;
+
+    #[test]
+    fn the_builder_lists_the_tls_and_the_connector_it_was_given() {
+        let lines = coqui_syshttp::hyper::builder::<http_body_util::Empty<bytes::Bytes>>()
+            .tls(unverified())
+            .connector(loose_connector())
+            .non_defaults();
+        assert!(mentions(&lines, "trust"), "{lines:?}");
+        assert!(mentions(&lines, "Negotiate::plain_http"), "{lines:?}");
+    }
     use bytes::Bytes;
     use coqui_syshttp::hyper::HttpsConnector;
     use http_body_util::{BodyExt, Empty};
@@ -292,6 +322,17 @@ mod reqwest_client {
             "no client certificate"
         );
         assert!(!coqui_syshttp::reqwest::builder().not_applied().is_empty());
+    }
+
+    #[test]
+    fn the_builder_lists_its_connector_but_cannot_inspect_a_raw_tls_configuration() {
+        let lines = coqui_syshttp::reqwest::builder()
+            .connector(loose_connector())
+            .non_defaults();
+        assert!(mentions(&lines, "Negotiate::plain_http"), "{lines:?}");
+        let (_, config) = plain_origin();
+        let raw = coqui_syshttp::reqwest::builder().tls_config(config);
+        assert!(raw.non_defaults().is_empty());
     }
 
     #[tokio::test]
@@ -511,6 +552,20 @@ mod ureq_agent {
     use super::*;
     use coqui_syshttp::ureq::AgentBuilder;
 
+    #[test]
+    fn the_builder_lists_the_tls_and_the_connector_it_was_given() {
+        let lines = AgentBuilder::new()
+            .tls(unverified())
+            .connector(loose_connector())
+            .non_defaults();
+        assert!(mentions(&lines, "trust"), "{lines:?}");
+        assert!(mentions(&lines, "Negotiate::plain_http"), "{lines:?}");
+        let shared = AgentBuilder::new()
+            .shared_tls(Arc::new(unverified()))
+            .non_defaults();
+        assert!(mentions(&shared, "trust"), "{shared:?}");
+    }
+
     fn get(agent: &ureq::Agent) -> Result<String, ureq::Error> {
         agent
             .get("https://app.internal.test/")
@@ -663,6 +718,14 @@ mod reqwest_blocking {
         );
         drop(clone);
         assert!(refuses(address), "the relay outlived its client");
+    }
+
+    #[test]
+    fn the_builder_lists_its_connector() {
+        let lines = coqui_syshttp::reqwest::blocking::builder()
+            .connector(loose_connector())
+            .non_defaults();
+        assert!(mentions(&lines, "Negotiate::plain_http"), "{lines:?}");
     }
 
     #[test]

@@ -150,12 +150,17 @@ impl Builder {
         self
     }
 
-    /// What this builder does that is looser than the defaults.
+    /// What this builder does that is looser than the defaults, the relay and the connector it
+    /// was given included. A TLS configuration given to [`Builder::tls_config`] is a raw
+    /// `rustls::ClientConfig`, which cannot say what it loosens: it is not inspected.
     #[must_use]
     pub fn non_defaults(&self) -> Vec<String> {
         let mut loose = self.adapter.non_defaults();
         if self.adapter.failover {
             loose.extend(self.relay.non_defaults());
+            if let Some(connector) = &self.connector {
+                loose.extend(connector.non_defaults());
+            }
         }
         loose
     }
