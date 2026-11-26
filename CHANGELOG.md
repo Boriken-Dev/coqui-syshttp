@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The proxy half moved to [coqui-proxy](https://github.com/Boriken-Dev/coqui-proxy) and the TLS half to
   [coqui-sslcontext](https://github.com/Boriken-Dev/coqui-sslcontext). Both are re-exported at the
   paths they had (root items, `auth`, `system`, `pac`, and `tls`), and as `proxy` and `tls`.
+- A client sends a certificate from the keystore only when a rule, policy or chooser picks one for the server (coqui-sslcontext
+  `CertificatePolicy`, `TlsBuilder::certificate_policy`); the sole fitting identity is no longer sent unasked unless
+  `TlsBuilder::send_sole_candidate(true)` is set, which `Tls::non_defaults()` lists.
 - The `client` module is now `ureq`.
 - `Error` wraps the two crates' errors (`Proxy`, `Tls`) and has an `Http` variant.
 

@@ -8,7 +8,9 @@ mod support;
 use std::sync::Arc;
 
 use coqui_syshttp::system::{SettingsSource, SettingsState, SystemSettings};
-use coqui_syshttp::tls::{ClientCertificates, Identity, IdentitySource, Selector, Tls, Trust};
+use coqui_syshttp::tls::{
+    CertificateChoice, ClientCertificates, Identity, IdentitySource, Selector, Tls, Trust,
+};
 use coqui_syshttp::ureq::AgentBuilder;
 use coqui_syshttp::{Credentials, Environment, Resolver};
 use support::pki::{Ca, Leaf};
@@ -64,7 +66,10 @@ fn world(source: impl FnOnce(&Leaf) -> Box<dyn IdentitySource>) -> World {
         .credentials(Credentials::new("ada", "s3cret"))
         .build();
 
-    let selector = Selector::builder().source(Boxed(source(&client))).build();
+    let selector = Selector::builder()
+        .source(Boxed(source(&client)))
+        .policy(Arc::new(|_host| CertificateChoice::First))
+        .build();
     let tls = Tls::builder()
         .trust(Trust::Roots(vec![server_ca.der()]))
         .client_certificates(ClientCertificates::Selector(Arc::new(selector)))

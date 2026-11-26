@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 #[cfg(any(feature = "ureq", feature = "hyper"))]
-use coqui_syshttp::tls::{ClientCertificates, Identity, Selector};
+use coqui_syshttp::tls::{CertificateChoice, ClientCertificates, Identity, Selector};
 use coqui_syshttp::tls::{Tls, Trust};
 use coqui_syshttp::{Credentials, Environment, Resolver};
 use support::pki::Ca;
@@ -102,7 +102,10 @@ fn origin() -> Origin {
         &[client_ca.der()],
         ClientAuth::Required,
     );
-    let selector = Selector::builder().source(identity(&client)).build();
+    let selector = Selector::builder()
+        .source(identity(&client))
+        .policy(Arc::new(|_host| CertificateChoice::First))
+        .build();
     let tls = Tls::builder()
         .trust(Trust::Roots(vec![server_ca.der()]))
         .client_certificates(ClientCertificates::Selector(Arc::new(selector)))
