@@ -171,7 +171,7 @@ fn unreadable(directory: &std::path::Path, name: &str) -> std::path::PathBuf {
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::write(&path, "token\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
     }
     path
 }
