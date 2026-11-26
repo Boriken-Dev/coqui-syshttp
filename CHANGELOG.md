@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `SessionSettings::non_defaults()`.
 - A `reqwest` or `reqwest::blocking` client with `failover(false)` fails a request whose proxy lookup fails (an
   erroring PAC, a malformed proxy setting) instead of sending it direct.
+- A cookie `Domain` that is a public suffix is refused unless it is the host: the Public Suffix List (feature `psl`, on
+  with `session`) joins the registry heuristic. `CookieSettings::{public_suffixes, public_suffix_list}` add suffixes
+  and turn the list off (listed by `SessionSettings::non_defaults()`); `SetCookieContext::{public_suffixes,
+  public_suffix_list}`.
 
 ### Added
 

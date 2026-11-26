@@ -471,3 +471,69 @@ proptest! {
         prop_assert_eq!(&loaded[0], &original);
     }
 }
+
+fn with(context: SetCookieContext, headers: &[&str], host: &str) -> Vec<(Cookie, bool)> {
+    parse_set_cookie(headers, host, &context.now(at(NOW)))
+}
+
+#[test]
+fn a_suffix_the_operator_lists_is_refused_as_a_domain_and_a_host_only_cookie_is_kept() {
+    let listed = || SetCookieContext::new().public_suffixes(["pages.example"]);
+    assert!(with(listed(), &["a=b; Domain=pages.example"], "a.pages.example").is_empty());
+    assert!(with(listed(), &["a=b; Domain=.Pages.Example"], "a.pages.example").is_empty());
+    let kept = with(listed(), &["a=b"], "a.pages.example");
+    assert_eq!(kept.len(), 1);
+    assert_eq!(
+        (kept[0].0.domain.as_str(), kept[0].0.subdomains),
+        ("a.pages.example", false)
+    );
+    // A domain below the suffix is the tenant's own and still covers its subdomains.
+    let own = with(
+        listed(),
+        &["a=b; Domain=a.pages.example"],
+        "www.a.pages.example",
+    );
+    assert_eq!(own.len(), 1);
+    assert!(own[0].0.subdomains);
+    // Unlisted, the suffix is an ordinary domain.
+    assert_eq!(
+        parse(&["a=b; Domain=pages.example"], "a.pages.example").len(),
+        1
+    );
+}
+
+#[test]
+fn the_public_suffix_list_refuses_a_registry_the_heuristic_does_not_know() {
+    // `gob.mx` is a registry under a country code, not one of the labels the heuristic knows.
+    assert!(parse(&["a=b; Domain=gob.mx"], "agency.gob.mx").is_empty());
+    assert!(parse(&["a=b; Domain=.GOB.MX"], "agency.gob.mx").is_empty());
+    let own = parse(&["a=b; Domain=agency.gob.mx"], "www.agency.gob.mx");
+    assert_eq!(own.len(), 1);
+    assert!(own[0].0.subdomains);
+    // The check can be turned off.
+    let off = with(
+        SetCookieContext::new().public_suffix_list(false),
+        &["a=b; Domain=gob.mx"],
+        "agency.gob.mx",
+    );
+    assert_eq!(off.len(), 1);
+    assert!(off[0].0.subdomains);
+}
+
+#[test]
+fn the_cookie_settings_name_what_loosens_the_suffix_check() {
+    use coqui_syshttp::session::SessionSettings;
+    assert!(SessionSettings::default().non_defaults().is_empty());
+    let mut settings = SessionSettings::default();
+    settings.cookies.public_suffix_list = false;
+    assert!(
+        settings
+            .non_defaults()
+            .iter()
+            .any(|line| line.contains("Public Suffix List"))
+    );
+    // Extra suffixes only tighten the check.
+    let mut settings = SessionSettings::default();
+    settings.cookies.public_suffixes = vec!["pages.example".into()];
+    assert!(settings.non_defaults().is_empty());
+}

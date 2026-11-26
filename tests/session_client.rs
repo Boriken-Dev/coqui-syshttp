@@ -1252,3 +1252,59 @@ fn a_token_is_scoped_to_the_port_unless_any_port_is_set() {
             .any(|line| line.contains("any port"))
     );
 }
+
+/// A transport whose every reply sets the cookies it was given.
+#[derive(Debug)]
+struct SetsCookies(Vec<&'static str>);
+
+impl coqui_syshttp::session::Transport for SetsCookies {
+    fn send(
+        &self,
+        request: coqui_syshttp::session::PreparedRequest,
+        _stream: bool,
+    ) -> Result<coqui_syshttp::session::Response, Error> {
+        let headers = coqui_syshttp::session::Headers::from_pairs(
+            self.0.iter().map(|cookie| ("Set-Cookie", *cookie)),
+        );
+        Ok(coqui_syshttp::session::ResponseBuilder::new(200)
+            .headers(headers)
+            .url(request.url)
+            .build())
+    }
+
+    fn close(&self) {}
+}
+
+#[test]
+fn the_clients_cookie_settings_decide_which_suffix_a_domain_may_name() {
+    let kept = |change: fn(&mut coqui_syshttp::session::SessionSettings)| {
+        let mut settings = coqui_syshttp::session::SessionSettings::default();
+        change(&mut settings);
+        let client = Client::builder()
+            .env(quiet(&[]))
+            .settings(settings)
+            .transport(SetsCookies(vec![
+                "a=1; Domain=pages.example",
+                "b=2; Domain=gob.mx",
+            ]))
+            .build()
+            .unwrap();
+        client
+            .request(Method::GET, "https://a.pages.example/")
+            .send()
+            .unwrap();
+        client
+            .request(Method::GET, "https://agency.gob.mx/")
+            .send()
+            .unwrap();
+        let mut names: Vec<String> = client.cookies().into_iter().map(|c| c.name).collect();
+        names.sort();
+        names
+    };
+    assert_eq!(kept(|_| {}), ["a"]);
+    assert_eq!(
+        kept(|s| s.cookies.public_suffixes = vec!["pages.example".into()]),
+        Vec::<String>::new()
+    );
+    assert_eq!(kept(|s| s.cookies.public_suffix_list = false), ["a", "b"]);
+}

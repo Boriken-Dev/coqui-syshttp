@@ -22,7 +22,8 @@ own `AGENTS.md`:
 | `hyper` | `tls`, `coqui-proxy/hyper`, `hyper`, `hyper-util`, `tokio`, `tokio-rustls`, `tower-service` | the `hyper` module: `client()` | off |
 | `reqwest` | `tls`, `coqui-proxy/relay`, `reqwest` 0.13 (no TLS backend of its own, `socks`), `rustls`, `tracing`, `tokio` (the runtime handle) | the `reqwest` module: `client()` | off |
 | `reqwest-blocking` | `reqwest`, `reqwest/blocking`, `coqui-proxy/relay-blocking` | the `reqwest::blocking` module: `client()` | off |
-| `session` | `ureq`, `url`, `regex`, `flate2`, `encoding_rs`, `percent-encoding` | the `session` module | off |
+| `psl` | `psl` (the Public Suffix List as Rust source) | a cookie `Domain` naming a public suffix is refused; `session` turns it on | off |
+| `session` | `ureq`, `psl`, `url`, `regex`, `flate2`, `encoding_rs`, `percent-encoding` | the `session` module | off |
 | `json` | `session`, `serde`, `serde_json` | `Response::json`, `FetchBuilder::json` | off |
 | `session-reqwest` | `session`, `reqwest`, `reqwest/cookies` | the session jars as `reqwest` cookie stores, `reqwest::builder_from` | off |
 
@@ -201,6 +202,9 @@ Rust program in one environment share them. Secrets (`Secret`): token and cookie
 A jar token is sent only over `https:` or to a loopback host (`tokens.plain_http` lifts it) and only to the port it is
 kept for: the jar key is the host for the scheme's default port and `host:port` for another (a file `<host>_<port>.token`);
 `tokens.any_port` sends the host's entry to every port. Both are listed by `SessionSettings::non_defaults()`.
+A cookie `Domain` that is a public suffix is refused unless it is the host: a top level domain, a `co.uk`-style
+registry, a name in `cookies.public_suffixes`, or an entry of the Public Suffix List (feature `psl`, on with `session`);
+`cookies.public_suffix_list = false` skips the list and is listed by `non_defaults()`.
 
 ```rust
 // session::{Client, ClientBuilder, RequestBuilder, HookRequest}
@@ -245,13 +249,13 @@ retries is returned. `gzip` and `deflate` are decoded unless the caller set `Acc
 `retry` {`count` 3, `backoff` 1 s, `backoff_max` 120 s, `statuses` 408 429 500 502 503 504, `methods` GET HEAD OPTIONS
 PUT DELETE TRACE PROPFIND}, `max_reply_bytes` 8 MiB, `decode_chunk` 256 KiB, `max_interim_replies` 8, `pool` {`max_idle` 8,
 `max_idle_per_route` 1, `reuse_window` 1 s, `idle_timeout` 15 s}, `cookies` {`store` `Memory`|`PerHost`|`Key`|`Jar`, `hosts`,
-`max_age` 400 d, `max_per_host` 180, `max_bytes` 4096}, `tokens` {`store` `None`|`PerHost`|`Key`|`Jar`, `plain_http` false, `any_port` false}, `tls_max_age` 60 s,
+`max_age` 400 d, `max_per_host` 180, `max_bytes` 4096, `public_suffixes` none, `public_suffix_list` true}, `tokens` {`store` `None`|`PerHost`|`Key`|`Jar`, `plain_http` false, `any_port` false}, `tls_max_age` 60 s,
 `system_proxy_max_age` 60 s, `peer_text_limit` 120.
 
 Sub-modules: `session::env` (`HttpEnv::{process, builder, prefixes, name, find, get, family, environment,
 system_proxy_enabled, proxy_auth_header, proxy_type, configured_proxy, check_proxy_settings, resolver(ProxyOverrides),
 resolver_with}` and the setting-name constants), `session::cookies` (`Cookie`, `CookieLike`, `HostAliases`,
-`parse_set_cookie`, `SetCookieContext`, `domain_covers`, `load_netscape`, `save_netscape`), `session::jar`
+`parse_set_cookie`, `SetCookieContext` (`public_suffixes(..)`, `public_suffix_list(bool)`), `domain_covers`, `load_netscape`, `save_netscape`), `session::jar`
 (`CookieJar`, `TokenJar`, `MemoryCookieJar`, `MemoryTokenJar`, `FileCookieJar`, `FileTokenJar`, `store_root`,
 `default_root`, `safe_name`, `HOME`), `session::hooks` (`Hook`, `HookKind`, `from_env`, `matching`, `skipped`,
 `split_command`, `curl_command`, `wrapper_environment`, the `SYSHTTP_HOOK*` constants).

@@ -46,7 +46,9 @@ reqwest = ["tls", "coqui-proxy/relay", "dep:reqwest", "dep:rustls", "dep:tracing
 reqwest-blocking = ["reqwest", "reqwest/blocking", "coqui-proxy/relay-blocking"]
 # The session layer: a client above `ureq` that owns redirects, cookies, tokens, hooks, retries and a deadline,
 # with its settings read through prefixed environment variables.
-session = ["ureq", "dep:url", "dep:regex", "dep:flate2", "dep:percent-encoding", "dep:encoding_rs"]
+session = ["ureq", "psl", "dep:url", "dep:regex", "dep:flate2", "dep:percent-encoding", "dep:encoding_rs"]
+# The Public Suffix List, to refuse a cookie `Domain` that is a shared suffix (`session` turns it on).
+psl = ["dep:psl"]
 # JSON bodies and replies of the session layer.
 json = ["session", "dep:serde", "dep:serde_json"]
 # The session layer cookie jars as `reqwest` cookie stores.
@@ -80,6 +82,8 @@ regex = { version = "1", optional = true }
 flate2 = { version = "1", optional = true }
 percent-encoding = { version = "2", optional = true }
 encoding_rs = { version = "0.8", optional = true }
+# The Public Suffix List as Rust source (feature `psl`).
+psl = { version = "2", optional = true }
 serde = { version = "1", optional = true }
 serde_json = { version = "1", optional = true }
 

@@ -236,7 +236,9 @@ impl Cookies {
             .now(now)
             .request_path(url.path())
             .aliases(self.aliases.clone())
-            .max_age(self.settings.max_age);
+            .max_age(self.settings.max_age)
+            .public_suffixes(self.settings.public_suffixes.iter().cloned())
+            .public_suffix_list(self.settings.public_suffix_list);
         let found = parse_set_cookie(values, &url_host(url), &context);
         let secure = url.scheme() == "https" || SECURE_HOSTS.contains(&url_host(url).as_str());
         let Ok(mut rows) = self.rows.lock() else {

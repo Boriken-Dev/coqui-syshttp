@@ -4,8 +4,8 @@
 //! The rules are those of Python syshttp: `Secure` cookies also go to loopback over plain http,
 //! a `Secure` cookie is neither set, replaced nor deleted from plain http (RFC 6265bis 5.7),
 //! `Max-Age` beats `Expires`, a lifetime is cut to a limit (400 days), and a public suffix is
-//! recognised without the Public Suffix List (a top level domain, or a registry under a country
-//! code such as `co.uk`).
+//! a top level domain, a registry under a country code such as `co.uk`, a suffix the operator
+//! lists, or (feature `psl`, on with `session`) an entry of the Public Suffix List.
 
 mod aliases;
 mod netscape;

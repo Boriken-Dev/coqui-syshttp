@@ -155,6 +155,14 @@ pub struct CookieSettings {
     pub max_per_host: usize,
     /// Most bytes in a cookie's name and value together; a larger cookie is ignored (4096).
     pub max_bytes: usize,
+    /// Domains that are public suffixes besides those the Public Suffix List and the built-in
+    /// checks know (none): a cookie whose `Domain` names one is refused unless it is the host.
+    /// Case is ignored and a leading dot is dropped.
+    pub public_suffixes: Vec<String>,
+    /// Whether a cookie's `Domain` is checked against the Public Suffix List (yes). Off, only
+    /// top level domains, `co.uk`-style registries and `public_suffixes` are refused, so a host
+    /// under a shared-hosting suffix can set a cookie for every other tenant of it.
+    pub public_suffix_list: bool,
 }
 
 impl Default for CookieSettings {
@@ -165,6 +173,8 @@ impl Default for CookieSettings {
             max_age: Duration::from_secs(400 * 24 * 3600),
             max_per_host: 180,
             max_bytes: 4096,
+            public_suffixes: Vec::new(),
+            public_suffix_list: true,
         }
     }
 }
@@ -259,6 +269,12 @@ impl SessionSettings {
             || self.cookies.max_bytes > defaults.cookies.max_bytes
         {
             loose.push("cookie bounds above the defaults".to_string());
+        }
+        if !self.cookies.public_suffix_list {
+            loose.push(
+                "cookies.public_suffix_list: a Domain is not checked against the Public Suffix List"
+                    .to_string(),
+            );
         }
         if self.tokens.plain_http {
             loose.push("tokens.plain_http: a token may cross plain http".to_string());
